@@ -2263,7 +2263,14 @@ bool convertScan3dMsg(
 		if(hasColors)
 		{
 			pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
-			pcl::fromROSMsg(scan3dMsg, *pclScan);
+			
+			//pcl::fromROSMsg(scan3dMsg, *pclScan);
+			pcl::PCLPointCloud2 pcl_pc2;
+            pcl_conversions::toPCL(scan3dMsg, pcl_pc2);
+            for(int i=0; i<pcl_pc2.fields.size(); i++) 
+			    if(pcl_pc2.fields[i].name == "rgba") pcl_pc2.fields[i].name = "rgb";
+			pcl::fromPCLPointCloud2(pcl_pc2, *pclScan);
+
 			if(!pclScan->is_dense)
 			{
 				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
@@ -2296,7 +2303,14 @@ bool convertScan3dMsg(
 		if(hasColors)
 		{
 			pcl::PointCloud<pcl::PointXYZRGB>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZRGB>);
-			pcl::fromROSMsg(scan3dMsg, *pclScan);
+			
+			//pcl::fromROSMsg(scan3dMsg, *pclScan);
+			pcl::PCLPointCloud2 pcl_pc2;
+            pcl_conversions::toPCL(scan3dMsg, pcl_pc2);
+            for(int i=0; i<pcl_pc2.fields.size(); i++) 
+			    if(pcl_pc2.fields[i].name == "rgba") pcl_pc2.fields[i].name = "rgb";
+			pcl::fromPCLPointCloud2(pcl_pc2, *pclScan);
+			
 			if(!pclScan->is_dense)
 			{
 				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
