@@ -198,8 +198,8 @@ private:
 				}
 			}
 
-			// UASSERT_MSG(pointCloud2Msg->data.size() == pointCloud2Msg->row_step*pointCloud2Msg->height,
-			// 		uFormat("data=%d row_step=%d height=%d", pointCloud2Msg->data.size(), pointCloud2Msg->row_step, pointCloud2Msg->height).c_str());
+			UASSERT_MSG(pointCloud2Msg->data.size() == pointCloud2Msg->row_step*pointCloud2Msg->height,
+					uFormat("data=%d row_step=%d height=%d", pointCloud2Msg->data.size(), pointCloud2Msg->row_step, pointCloud2Msg->height).c_str());
 
 			pcl::PCLPointCloud2::Ptr cloud(new pcl::PCLPointCloud2);
 			pcl_conversions::toPCL(*pointCloud2Msg, *cloud);
