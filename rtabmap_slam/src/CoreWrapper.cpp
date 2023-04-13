@@ -3612,8 +3612,8 @@ bool CoreWrapper::publishMapCallback(rtabmap_msgs::PublishMap::Request& req, rta
 							marker.pose.orientation.y = 0.0;
 							marker.pose.orientation.z = 0.0;
 							marker.pose.orientation.w = 1.0;
-							marker.scale.x = 1;
-							marker.scale.y = 1;
+							marker.scale.x = 2;
+							marker.scale.y = 2;
 							marker.scale.z = 0.2;
 							marker.color.a = 0.5;
 							marker.color.r = 1.0;
