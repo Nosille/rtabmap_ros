@@ -6,7 +6,7 @@ find_package(catkin REQUIRED COMPONENTS
             nodelet message_filters rtabmap_msgs rtabmap_conversions
 )
 
-option(RTABMAP_SYNC_MULTI_RGBD "Build with multi RGBD camera synchronization support"  OFF)
+option(RTABMAP_SYNC_MULTI_RGBD "Build with multi RGBD camera synchronization support"  ON)
 option(RTABMAP_SYNC_USER_DATA "Build with input user data support"  OFF)
 MESSAGE(STATUS "RTABMAP_SYNC_MULTI_RGBD = ${RTABMAP_SYNC_MULTI_RGBD}")
 MESSAGE(STATUS "RTABMAP_SYNC_USER_DATA  = ${RTABMAP_SYNC_USER_DATA}")
