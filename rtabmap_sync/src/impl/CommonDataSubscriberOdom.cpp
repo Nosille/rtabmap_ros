@@ -32,7 +32,6 @@ namespace rtabmap_sync {
 void CommonDataSubscriber::odomCallback(
 		const nav_msgs::OdometryConstPtr& odomMsg)
 {
-	callbackCalled();
 	rtabmap_msgs::UserDataConstPtr userDataMsg; // Null
 	sensor_msgs::PointCloud2ConstPtr scan3dMsg; // Null
 	rtabmap_msgs::OdomInfoConstPtr odomInfoMsg; // null
@@ -42,7 +41,6 @@ void CommonDataSubscriber::odomInfoCallback(
 		const nav_msgs::OdometryConstPtr& odomMsg,
 		const rtabmap_msgs::OdomInfoConstPtr& odomInfoMsg)
 {
-	callbackCalled();
 	rtabmap_msgs::UserDataConstPtr userDataMsg; // Null
 	sensor_msgs::LaserScanConstPtr scan2dMsg; // Null
 	commonOdomCallback(odomMsg, userDataMsg, odomInfoMsg);
@@ -52,7 +50,6 @@ void CommonDataSubscriber::odomDataCallback(
 		const nav_msgs::OdometryConstPtr& odomMsg,
 		const rtabmap_msgs::UserDataConstPtr & userDataMsg)
 {
-	callbackCalled();
 	rtabmap_msgs::OdomInfoConstPtr odomInfoMsg; // null
 	commonOdomCallback(odomMsg, userDataMsg, odomInfoMsg);
 }
@@ -61,7 +58,6 @@ void CommonDataSubscriber::odomDataInfoCallback(
 		const rtabmap_msgs::UserDataConstPtr & userDataMsg,
 		const rtabmap_msgs::OdomInfoConstPtr& odomInfoMsg)
 {
-	callbackCalled();
 	sensor_msgs::PointCloud2ConstPtr scan3dMsg; // Null
 	commonOdomCallback(odomMsg, userDataMsg, odomInfoMsg);
 }
@@ -71,29 +67,27 @@ void CommonDataSubscriber::setupOdomCallbacks(
 		ros::NodeHandle & nh,
 		ros::NodeHandle & pnh,
 		bool subscribeUserData,
-		bool subscribeOdomInfo,
-		int queueSize,
-		bool approxSync)
+		bool subscribeOdomInfo)
 {
 	ROS_INFO("Setup scan callback");
 
 	if(subscribeUserData || subscribeOdomInfo)
 	{
-		odomSub_.subscribe(nh, "odom", queueSize);
+		odomSub_.subscribe(nh, "odom", topicQueueSize_);
 
 #ifdef RTABMAP_SYNC_USER_DATA
 		if(subscribeUserData)
 		{
-			userDataSub_.subscribe(nh, "user_data", queueSize);
+			userDataSub_.subscribe(nh, "user_data", topicQueueSize_);
 			if(subscribeOdomInfo)
 			{
 				subscribedToOdomInfo_ = true;
-				odomInfoSub_.subscribe(nh, "odom_info", queueSize);
-				SYNC_DECL3(CommonDataSubscriber, odomDataInfo, approxSync, queueSize, odomSub_, userDataSub_, odomInfoSub_);
+				odomInfoSub_.subscribe(nh, "odom_info", topicQueueSize_);
+				SYNC_DECL3(CommonDataSubscriber, odomDataInfo, approxSync_, syncQueueSize_, odomSub_, userDataSub_, odomInfoSub_);
 			}
 			else
 			{
-				SYNC_DECL2(CommonDataSubscriber, odomData, approxSync, queueSize, odomSub_, userDataSub_);
+				SYNC_DECL2(CommonDataSubscriber, odomData, approxSync_, syncQueueSize_, odomSub_, userDataSub_);
 			}
 		}
 		else 
@@ -101,13 +95,13 @@ void CommonDataSubscriber::setupOdomCallbacks(
 		if(subscribeOdomInfo)
 		{
 			subscribedToOdomInfo_ = true;
-			odomInfoSub_.subscribe(nh, "odom_info", queueSize);
-			SYNC_DECL2(CommonDataSubscriber, odomInfo, approxSync, queueSize, odomSub_, odomInfoSub_);
+			odomInfoSub_.subscribe(nh, "odom_info", topicQueueSize_);
+			SYNC_DECL2(CommonDataSubscriber, odomInfo, approxSync_, syncQueueSize_, odomSub_, odomInfoSub_);
 		}
 	}
 	else
 	{
-		odomSubOnly_ = nh.subscribe("odom", queueSize, &CommonDataSubscriber::odomCallback, this);
+		odomSubOnly_ = nh.subscribe("odom", syncQueueSize_, &CommonDataSubscriber::odomCallback, this);
 		subscribedTopicsMsg_ =
 				uFormat("\n%s subscribed to:\n   %s",
 				ros::this_node::getName().c_str(),

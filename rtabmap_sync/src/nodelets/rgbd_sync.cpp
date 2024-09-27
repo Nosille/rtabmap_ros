@@ -53,6 +53,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap/core/util2d.h"
 #include "rtabmap/utilite/UConversion.h"
 
+#include "rtabmap_sync/SyncDiagnostic.h"
+
 namespace rtabmap_sync
 {
 
@@ -63,25 +65,14 @@ public:
 		depthScale_(1.0),
 		decimation_(1),
 		compressedRate_(0),
-		warningThread_(0),
-		callbackCalled_(false),
 		approxSyncDepth_(0),
 		exactSyncDepth_(0)
 	{}
 
 	virtual ~RGBDSync()
 	{
-		if(approxSyncDepth_)
-			delete approxSyncDepth_;
-		if(exactSyncDepth_)
-			delete exactSyncDepth_;
-
-		if(warningThread_)
-		{
-			callbackCalled_=true;
-			warningThread_->join();
-			delete warningThread_;
-		}
+		delete approxSyncDepth_;
+		delete exactSyncDepth_;
 	}
 
 private:
@@ -90,12 +81,25 @@ private:
 		ros::NodeHandle & nh = getNodeHandle();
 		ros::NodeHandle & pnh = getPrivateNodeHandle();
 
-		int queueSize = 10;
+		int queueSize = 1;
+		int syncQueueSize = 10;
 		bool approxSync = true;
 		double approxSyncMaxInterval = 0.0;
 		pnh.param("approx_sync", approxSync, approxSync);
 		pnh.param("approx_sync_max_interval", approxSyncMaxInterval, approxSyncMaxInterval);
-		pnh.param("queue_size", queueSize, queueSize);
+		pnh.param("topic_queue_size", queueSize, queueSize);
+		if(pnh.hasParam("queue_size") && !pnh.hasParam("sync_queue_size"))
+		{
+			pnh.param("queue_size", syncQueueSize, syncQueueSize);
+			ROS_WARN("Parameter \"queue_size\" has been renamed "
+					"to \"sync_queue_size\" and will be removed "
+					"in future versions! The value (%d) is still copied to "
+					"\"sync_queue_size\".", syncQueueSize);
+		}
+		else
+		{
+			pnh.param("sync_queue_size", syncQueueSize, syncQueueSize);
+		}
 		pnh.param("depth_scale", depthScale_, depthScale_);
 		pnh.param("decimation", decimation_, decimation_);
 		pnh.param("compressed_rate", compressedRate_, compressedRate_);
@@ -108,7 +112,8 @@ private:
 		NODELET_INFO("%s: approx_sync = %s", getName().c_str(), approxSync?"true":"false");
 		if(approxSync)
 			NODELET_INFO("%s: approx_sync_max_interval = %f", getName().c_str(), approxSyncMaxInterval);
-		NODELET_INFO("%s: queue_size  = %d", getName().c_str(), queueSize);
+		NODELET_INFO("%s: topic_queue_size  = %d", getName().c_str(), queueSize);
+		NODELET_INFO("%s: sync_queue_size  = %d", getName().c_str(), syncQueueSize);
 		NODELET_INFO("%s: depth_scale = %f", getName().c_str(), depthScale_);
 		NODELET_INFO("%s: decimation = %d", getName().c_str(), decimation_);
 		NODELET_INFO("%s: compressed_rate = %f", getName().c_str(), compressedRate_);
@@ -118,14 +123,14 @@ private:
 
 		if(approxSync)
 		{
-			approxSyncDepth_ = new message_filters::Synchronizer<MyApproxSyncDepthPolicy>(MyApproxSyncDepthPolicy(queueSize), imageSub_, imageDepthSub_, cameraInfoSub_);
+			approxSyncDepth_ = new message_filters::Synchronizer<MyApproxSyncDepthPolicy>(MyApproxSyncDepthPolicy(syncQueueSize), imageSub_, imageDepthSub_, cameraInfoSub_);
 			if(approxSyncMaxInterval > 0.0)
 				approxSyncDepth_->setMaxIntervalDuration(ros::Duration(approxSyncMaxInterval));
 			approxSyncDepth_->registerCallback(boost::bind(&RGBDSync::callback, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3));
 		}
 		else
 		{
-			exactSyncDepth_ = new message_filters::Synchronizer<MyExactSyncDepthPolicy>(MyExactSyncDepthPolicy(queueSize), imageSub_, imageDepthSub_, cameraInfoSub_);
+			exactSyncDepth_ = new message_filters::Synchronizer<MyExactSyncDepthPolicy>(MyExactSyncDepthPolicy(syncQueueSize), imageSub_, imageDepthSub_, cameraInfoSub_);
 			exactSyncDepth_->registerCallback(boost::bind(&RGBDSync::callback, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3));
 		}
 
@@ -138,9 +143,9 @@ private:
 		image_transport::TransportHints hintsRgb("raw", ros::TransportHints(), rgb_pnh);
 		image_transport::TransportHints hintsDepth("raw", ros::TransportHints(), depth_pnh);
 
-		imageSub_.subscribe(rgb_it, rgb_nh.resolveName("image"), 1, hintsRgb);
-		imageDepthSub_.subscribe(depth_it, depth_nh.resolveName("image"), 1, hintsDepth);
-		cameraInfoSub_.subscribe(rgb_nh, "camera_info", 1);
+		imageSub_.subscribe(rgb_it, rgb_nh.resolveName("image"), queueSize, hintsRgb);
+		imageDepthSub_.subscribe(depth_it, depth_nh.resolveName("image"), queueSize, hintsDepth);
+		cameraInfoSub_.subscribe(rgb_nh, "camera_info", queueSize);
 
 		std::string subscribedTopicsMsg = uFormat("\n%s subscribed to (%s sync%s):\n   %s \\\n   %s \\\n   %s",
 							getName().c_str(),
@@ -149,28 +154,17 @@ private:
 							imageSub_.getTopic().c_str(),
 							imageDepthSub_.getTopic().c_str(),
 							cameraInfoSub_.getTopic().c_str());
-
-		warningThread_ = new boost::thread(boost::bind(&RGBDSync::warningLoop, this, subscribedTopicsMsg, approxSync));
 		NODELET_INFO("%s", subscribedTopicsMsg.c_str());
-	}
 
-	void warningLoop(const std::string & subscribedTopicsMsg, bool approxSync)
-	{
-		ros::Duration r(5.0);
-		while(!callbackCalled_)
-		{
-			r.sleep();
-			if(!callbackCalled_)
-			{
-				ROS_WARN("%s: Did not receive data since 5 seconds! Make sure the input topics are "
-						"published (\"$ rostopic hz my_topic\") and the timestamps in their "
-						"header are set. %s%s",
-						getName().c_str(),
-						approxSync?"":"Parameter \"approx_sync\" is false, which means that input "
-							"topics should have all the exact timestamp for the callback to be called.",
-						subscribedTopicsMsg.c_str());
-			}
-		}
+		syncDiagnostic_.reset(new SyncDiagnostic(nh, pnh, getName()));
+		syncDiagnostic_->init(rgb_nh.resolveName("image"),
+			uFormat("%s: Did not receive data since 5 seconds! Make sure the input topics are "
+					"published (\"$ rostopic hz my_topic\") and the timestamps in their "
+					"header are set. %s%s",
+					getName().c_str(),
+					approxSync?"":"Parameter \"approx_sync\" is false, which means that input "
+						"topics should have all the exact timestamp for the callback to be called.",
+					subscribedTopicsMsg.c_str()));
 	}
 
 	void callback(
@@ -178,7 +172,8 @@ private:
 			  const sensor_msgs::ImageConstPtr& depth,
 			  const sensor_msgs::CameraInfoConstPtr& cameraInfo)
 	{
-		callbackCalled_ = true;
+		syncDiagnostic_->tick(image->header.stamp);
+
 		if(rgbdImagePub_.getNumSubscribers() || rgbdImageCompressedPub_.getNumSubscribers())
 		{
 			double rgbStamp = image->header.stamp.toSec();
@@ -309,8 +304,6 @@ private:
 	double depthScale_;
 	int decimation_;
 	double compressedRate_;
-	boost::thread * warningThread_;
-	bool callbackCalled_;
 
 	ros::Time lastCompressedPublished_;
 
@@ -326,6 +319,8 @@ private:
 
 	typedef message_filters::sync_policies::ExactTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo> MyExactSyncDepthPolicy;
 	message_filters::Synchronizer<MyExactSyncDepthPolicy> * exactSyncDepth_;
+
+	std::unique_ptr<SyncDiagnostic> syncDiagnostic_;
 };
 
 PLUGINLIB_EXPORT_CLASS(rtabmap_sync::RGBDSync, nodelet::Nodelet);

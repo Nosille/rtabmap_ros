@@ -60,6 +60,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/core/DBDriver.h>
 #include <rtabmap/core/Registration.h>
 #include <rtabmap/core/Graph.h>
+#include <rtabmap/core/LocalGridMaker.h>
 #include <rtabmap/core/Optimizer.h>
 
 #ifdef WITH_OCTOMAP_MSGS
@@ -93,6 +94,7 @@ CoreWrapper::CoreWrapper() :
 		lastPose_(Transform::getIdentity()),
 		lastPoseIntermediate_(false),
 		latestNodeWasReached_(false),
+		pubLocPoseOnlyWhenLocalizing_(false),
 		graphLatched_(false),
 		frameId_("base_link"),
 		odomFrameId_(""),
@@ -196,6 +198,7 @@ void CoreWrapper::onInit()
 	pnh.param("odom_tf_linear_variance", odomDefaultLinVariance_, odomDefaultLinVariance_);
 	pnh.param("landmark_angular_variance", landmarkDefaultAngVariance_, landmarkDefaultAngVariance_);
 	pnh.param("landmark_linear_variance", landmarkDefaultLinVariance_, landmarkDefaultLinVariance_);
+	pnh.param("pub_loc_pose_only_when_localizing", pubLocPoseOnlyWhenLocalizing_,pubLocPoseOnlyWhenLocalizing_);
 	pnh.param("wait_for_transform",  waitForTransform_, waitForTransform_);
 	pnh.param("wait_for_transform_duration",  waitForTransformDuration_, waitForTransformDuration_);
 	pnh.param("initial_pose",          initialPoseStr, initialPoseStr);
@@ -248,6 +251,7 @@ void CoreWrapper::onInit()
 	NODELET_INFO("rtabmap: tf_delay      = %f", tfDelay);
 	NODELET_INFO("rtabmap: tf_tolerance  = %f", tfTolerance);
 	NODELET_INFO("rtabmap: odom_sensor_sync   = %s", odomSensorSync_?"true":"false");
+	NODELET_INFO("rtabmap: pub_loc_pose_only_when_localizing = %s", pubLocPoseOnlyWhenLocalizing_?"true":"false");
 	bool subscribeStereo = false;
 	pnh.param("subscribe_stereo",      subscribeStereo, subscribeStereo);
 	if(subscribeStereo)
@@ -743,7 +747,16 @@ void CoreWrapper::onInit()
 				Parameters::kOptimizerIterations().c_str(), mapFrameId_.c_str());
 	}
 
-	setupCallbacks(nh, pnh, getName()); // do it at the end
+	std::vector<diagnostic_updater::DiagnosticTask*> tasks;
+	double localizationThreshold = 0.0f;
+	pnh.param("loc_thr", localizationThreshold, localizationThreshold);
+	if(rtabmap_.getMemory() && !rtabmap_.getMemory()->isIncremental() && localizationThreshold > 0.0)
+	{
+		NODELET_INFO("rtabmap: loc_thr  = %f", localizationThreshold);
+		localizationDiagnostic_.setLocalizationThreshold(localizationThreshold);
+		tasks.push_back(&localizationDiagnostic_);
+	}
+	setupCallbacks(nh, pnh, getName(), tasks); // do it at the end
 	if(!this->isDataSubscribed())
 	{
 		bool isRGBD = uStr2Bool(parameters_.at(Parameters::kRGBDEnabled()).c_str());
@@ -768,7 +781,8 @@ void CoreWrapper::onInit()
 			!this->isSubscribedToStereo() &&
 			!this->isSubscribedToRGBD() &&
 			!this->isSubscribedToRGB() &&
-			(this->isSubscribedToScan2d() || this->isSubscribedToScan3d() || this->isSubscribedToOdom()))
+			(this->isSubscribedToScan2d() || this->isSubscribedToScan3d() || this->isSubscribedToOdom()) &&
+			!this->isSubscribedToSensorData())
 	{
 		NODELET_WARN("There is no image subscription, bag-of-words loop closure detection will be disabled...");
 		int kpMaxFeatures = Parameters::defaultKpMaxFeatures();
@@ -1746,6 +1760,51 @@ void CoreWrapper::commonOdomCallback(
 	covariance_ = cv::Mat();
 }
 
+void CoreWrapper::commonSensorDataCallback(
+		const rtabmap_msgs::SensorDataConstPtr & sensorDataMsg,
+		const nav_msgs::OdometryConstPtr & odomMsg,
+		const rtabmap_msgs::OdomInfoConstPtr& odomInfoMsg)
+{
+	UTimer timerConversion;
+	UASSERT(sensorDataMsg.get());
+	std::string odomFrameId = odomFrameId_;
+	if(odomMsg.get())
+	{
+		odomFrameId = odomMsg->header.frame_id;
+		if(!odomUpdate(odomMsg, sensorDataMsg->header.stamp))
+		{
+			return;
+		}
+	}
+	else if(!odomTFUpdate(sensorDataMsg->header.stamp))
+	{
+		return;
+	}
+
+	SensorData data = rtabmap_conversions::sensorDataFromROS(*sensorDataMsg);
+	if(lastPoseIntermediate_)
+	{
+		data.setId(-1);
+	}
+
+	OdometryInfo odomInfo;
+	if(odomInfoMsg.get())
+	{
+		odomInfo = rtabmap_conversions::odomInfoFromROS(*odomInfoMsg);
+	}
+
+	process(lastPoseStamp_,
+			data,
+			lastPose_,
+			lastPoseVelocity_,
+			odomFrameId,
+			covariance_,
+			odomInfo,
+			timerConversion.ticks());
+
+	covariance_ = cv::Mat();
+}
+
 void CoreWrapper::process(
 		const ros::Time & stamp,
 		SensorData & data,
@@ -1886,11 +1945,11 @@ void CoreWrapper::process(
 				globalPose *= sensorToBase; // transform global pose from sensor frame to robot base frame
 
 				// Correction of the global pose accounting the odometry movement since we received it
-				Transform correction = rtabmap_conversions::getTransform(
+				Transform correction = rtabmap_conversions::getMovingTransform(
 						frameId_,
 						odomFrameId,
-						globalPose_.header.stamp,
 						lastPoseStamp_,
+						globalPose_.header.stamp,
 						tfListener_,
 						waitForTransform_?waitForTransformDuration_:0.0);
 				if(!correction.isNull())
@@ -2047,17 +2106,35 @@ void CoreWrapper::process(
 			}
 			else
 			{
-				if(localizationPosePub_.getNumSubscribers() &&
-					!rtabmap_.getStatistics().localizationCovariance().empty())
+				if(localizationPosePub_.getNumSubscribers())
 				{
-					geometry_msgs::PoseWithCovarianceStamped poseMsg;
-					poseMsg.header.frame_id = mapFrameId_;
-					poseMsg.header.stamp = stamp;
-					rtabmap_conversions::transformToPoseMsg(mapToOdom_*odom, poseMsg.pose.pose);
-					poseMsg.pose.covariance;
-					const cv::Mat & cov = rtabmap_.getStatistics().localizationCovariance();
-					memcpy(poseMsg.pose.covariance.data(), cov.data, cov.total()*sizeof(double));
-					localizationPosePub_.publish(poseMsg);
+					bool localized = rtabmap_.getStatistics().loopClosureId()!=0 ||
+							rtabmap_.getStatistics().proximityDetectionId()!=0 ||
+							static_cast<int>(uValue(rtabmap_.getStatistics().data(), rtabmap::Statistics::kLoopLandmark_detected(), 0.0f))!=0;
+
+					if(localized || !pubLocPoseOnlyWhenLocalizing_)
+					{
+						geometry_msgs::PoseWithCovarianceStamped poseMsg;
+						poseMsg.header.frame_id = mapFrameId_;
+						poseMsg.header.stamp = stamp;
+						rtabmap_conversions::transformToPoseMsg(mapToOdom_*odom, poseMsg.pose.pose);
+						if(!rtabmap_.getStatistics().localizationCovariance().empty())
+						{
+							const cv::Mat & cov = rtabmap_.getStatistics().localizationCovariance();
+							memcpy(poseMsg.pose.covariance.data(), cov.data, cov.total()*sizeof(double));
+						}
+						else
+						{
+							// Not yet localized, publish large covariance
+							poseMsg.pose.covariance.data()[0] = 9999;
+							poseMsg.pose.covariance.data()[7] = 9999;
+							poseMsg.pose.covariance.data()[14] = twoDMapping_?rtabmap::Registration::COVARIANCE_LINEAR_EPSILON:9999;
+							poseMsg.pose.covariance.data()[21] = twoDMapping_?rtabmap::Registration::COVARIANCE_ANGULAR_EPSILON:9999;
+							poseMsg.pose.covariance.data()[28] = twoDMapping_?rtabmap::Registration::COVARIANCE_ANGULAR_EPSILON:9999;
+							poseMsg.pose.covariance.data()[35] = 9999;
+						}
+						localizationPosePub_.publish(poseMsg);
+					}
 				}
 				std::map<int, rtabmap::Transform> filteredPoses(rtabmap_.getLocalOptimizedPoses().lower_bound(1), rtabmap_.getLocalOptimizedPoses().end());
 
@@ -2068,7 +2145,7 @@ void CoreWrapper::process(
 					rtabmap_.getMemory()->getLastSignatureId() != filteredPoses.rbegin()->first ||
 					rtabmap_.getMemory()->getLastWorkingSignature() == 0 ||
 					rtabmap_.getMemory()->getLastWorkingSignature()->sensorData().gridCellSize() == 0 ||
-					(!mapsManager_.getOccupancyGrid()->isGridFromDepth() && data.laserScanRaw().is2d())) // 2d laser scan would fill empty space for latest data
+					(!mapsManager_.getLocalMapMaker()->isGridFromDepth() && data.laserScanRaw().is2d())) // 2d laser scan would fill empty space for latest data
 				{
 					SensorData tmpData = data;
 					tmpData.setId(0);
@@ -2206,6 +2283,13 @@ void CoreWrapper::process(
 				}
 
 				timePublishMaps = timer.ticks();
+			}
+
+			// If not intermediate node
+			if(data.id() > 0)
+			{
+				localizationDiagnostic_.updateStatus(rtabmap_.getStatistics().localizationCovariance(), twoDMapping_);
+				tick(stamp, rate_>0?rate_:1000.0/(timeMsgConversion+timeRtabmap+timeUpdateMaps+timePublishMaps));
 			}
 		}
 		else
@@ -2651,7 +2735,7 @@ void CoreWrapper::goalNodeCallback(const rtabmap_msgs::GoalConstPtr & msg)
 
 bool CoreWrapper::updateRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&)
 {
-	ros::NodeHandle pnh("~");
+	ros::NodeHandle & pnh = getPrivateNodeHandle();
 	for(rtabmap::ParametersMap::iterator iter=parameters_.begin(); iter!=parameters_.end(); ++iter)
 	{
 		std::string vStr;
@@ -2756,8 +2840,7 @@ bool CoreWrapper::pauseRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empt
 	{
 		paused_ = true;
 		NODELET_INFO("rtabmap: paused!");
-		ros::NodeHandle pnh("~");
-		pnh.setParam("is_rtabmap_paused", true);
+		getPrivateNodeHandle().setParam("is_rtabmap_paused", true);
 	}
 	return true;
 }
@@ -2772,8 +2855,7 @@ bool CoreWrapper::resumeRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Emp
 	{
 		paused_ = false;
 		NODELET_INFO("rtabmap: resumed!");
-		ros::NodeHandle pnh("~");
-		pnh.setParam("is_rtabmap_paused", false);
+		getPrivateNodeHandle().setParam("is_rtabmap_paused", false);
 	}
 	return true;
 }
@@ -3232,8 +3314,8 @@ bool CoreWrapper::getNodeDataCallback(rtabmap_msgs::GetNodeData::Request& req, r
 
 		if(s.id()>0)
 		{
-			rtabmap_msgs::NodeData msg;
-			rtabmap_conversions::nodeDataToROS(s, msg);
+			rtabmap_msgs::Node msg;
+			rtabmap_conversions::nodeToROS(s, msg);
 			res.data.push_back(msg);
 		}
 	}
@@ -4465,6 +4547,50 @@ void CoreWrapper::publishGlobalPath(const ros::Time & stamp)
 			}
 		}
 	}
+}
+
+CoreWrapper::LocalizationStatusTask::LocalizationStatusTask() :
+		diagnostic_updater::DiagnosticTask("Localization status"),
+		localizationThreshold_(0.0),
+		localizationError_(9999)
+{}
+
+void CoreWrapper::LocalizationStatusTask::setLocalizationThreshold(double value)
+{
+	localizationThreshold_ = value;
+}
+
+void CoreWrapper::LocalizationStatusTask::updateStatus(const cv::Mat & cov, bool twoDMapping)
+{
+	if(localizationThreshold_ > 0.0 && !cov.empty())
+	{
+		if(cov.at<double>(0,0) >= 9999.0)
+		{
+			localizationError_ = 9999.0;
+		}
+		else
+		{
+			localizationError_ = sqrt(uMax3(cov.at<double>(0,0), cov.at<double>(1,1), twoDMapping?0.0:cov.at<double>(2,2)));
+		}
+	}
+}
+
+void CoreWrapper::LocalizationStatusTask::run(diagnostic_updater::DiagnosticStatusWrapper &stat)
+{
+	if(localizationError_>=9999)
+	{
+		stat.summary(diagnostic_msgs::DiagnosticStatus::ERROR, "Not localized!");
+	}
+	else if(localizationError_ > localizationThreshold_)
+	{
+		stat.summary(diagnostic_msgs::DiagnosticStatus::ERROR, "Localization error is high!");
+	}
+	else
+	{
+		stat.summary(diagnostic_msgs::DiagnosticStatus::OK, "Localized.");
+	}
+	stat.add("Localization error (m)", localizationError_);
+	stat.add("loc_thr (m)", localizationThreshold_);
 }
 
 #ifdef WITH_OCTOMAP_MSGS

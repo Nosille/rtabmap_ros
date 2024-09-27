@@ -70,21 +70,32 @@ public:
 		exactSync3_(0),
 		approxSync4_(0),
 		exactSync4_(0),
-		queueSize_(5),
+		approxSync5_(0),
+		exactSync5_(0),
+		approxSync6_(0),
+		exactSync6_(0),
+		topicQueueSize_(1),
+		syncQueueSize_(5),
 		keepColor_(false)
 	{
 	}
 
 	virtual ~StereoOdometry()
 	{
-		if(approxSync_)
-		{
-			delete approxSync_;
-		}
-		if(exactSync_)
-		{
-			delete exactSync_;
-		}
+		rgbdSub_.shutdown();
+		rgbdxSub_.shutdown();
+		delete approxSync_;
+		delete exactSync_;
+		delete approxSync2_;
+		delete exactSync2_;
+		delete approxSync3_;
+		delete exactSync3_;
+		delete approxSync4_;
+		delete exactSync4_;
+		delete approxSync5_;
+		delete exactSync5_;
+		delete approxSync6_;
+		delete exactSync6_;
 	}
 
 private:
@@ -99,7 +110,19 @@ private:
 		int rgbdCameras = 1;
 		pnh.param("approx_sync", approxSync, approxSync);
 		pnh.param("approx_sync_max_interval", approxSyncMaxInterval, approxSyncMaxInterval);
-		pnh.param("queue_size", queueSize_, queueSize_);
+		pnh.param("topic_queue_size", topicQueueSize_, topicQueueSize_);
+		if(pnh.hasParam("queue_size") && !pnh.hasParam("sync_queue_size"))
+		{
+			pnh.param("queue_size", syncQueueSize_, syncQueueSize_);
+			ROS_WARN("Parameter \"queue_size\" has been renamed "
+					"to \"sync_queue_size\" and will be removed "
+					"in future versions! The value (%d) is still copied to "
+					"\"sync_queue_size\".", syncQueueSize_);
+		}
+		else
+		{
+			pnh.param("sync_queue_size", syncQueueSize_, syncQueueSize_);
+		}
 		pnh.param("subscribe_rgbd", subscribeRGBD, subscribeRGBD);
 		pnh.param("rgbd_cameras", rgbdCameras, rgbdCameras);
 		pnh.param("keep_color", keepColor_, keepColor_);
@@ -107,24 +130,34 @@ private:
 		NODELET_INFO("StereoOdometry: approx_sync = %s", approxSync?"true":"false");
 		if(approxSync)
 			NODELET_INFO("StereoOdometry: approx_sync_max_interval = %f", approxSyncMaxInterval);
-		NODELET_INFO("StereoOdometry: queue_size = %d", queueSize_);
+		NODELET_INFO("StereoOdometry: topic_queue_size = %d", topicQueueSize_);
+		NODELET_INFO("StereoOdometry: sync_queue_size = %d", syncQueueSize_);
 		NODELET_INFO("StereoOdometry: subscribe_rgbd = %s", subscribeRGBD?"true":"false");
 		NODELET_INFO("StereoOdometry: keep_color = %s", keepColor_?"true":"false");
 
+		std::string subscribedTopic;
 		std::string subscribedTopicsMsg;
 		if(subscribeRGBD)
 		{
 			if(rgbdCameras >= 2)
 			{
-				rgbd_image1_sub_.subscribe(nh, "rgbd_image0", 1);
-				rgbd_image2_sub_.subscribe(nh, "rgbd_image1", 1);
+				rgbd_image1_sub_.subscribe(nh, "rgbd_image0", topicQueueSize_);
+				rgbd_image2_sub_.subscribe(nh, "rgbd_image1", topicQueueSize_);
 				if(rgbdCameras >= 3)
 				{
-					rgbd_image3_sub_.subscribe(nh, "rgbd_image2", 1);
+					rgbd_image3_sub_.subscribe(nh, "rgbd_image2", topicQueueSize_);
 				}
 				if(rgbdCameras >= 4)
 				{
-					rgbd_image4_sub_.subscribe(nh, "rgbd_image3", 1);
+					rgbd_image4_sub_.subscribe(nh, "rgbd_image3", topicQueueSize_);
+				}
+				if(rgbdCameras >= 5)
+				{
+					rgbd_image5_sub_.subscribe(nh, "rgbd_image4", topicQueueSize_);
+				}
+				if(rgbdCameras >= 6)
+				{
+					rgbd_image6_sub_.subscribe(nh, "rgbd_image5", topicQueueSize_);
 				}
 
 				if(rgbdCameras == 2)
@@ -132,7 +165,7 @@ private:
 					if(approxSync)
 					{
 						approxSync2_ = new message_filters::Synchronizer<MyApproxSync2Policy>(
-								MyApproxSync2Policy(queueSize_),
+								MyApproxSync2Policy(syncQueueSize_),
 								rgbd_image1_sub_,
 								rgbd_image2_sub_);
 						if(approxSyncMaxInterval > 0.0)
@@ -142,7 +175,7 @@ private:
 					else
 					{
 						exactSync2_ = new message_filters::Synchronizer<MyExactSync2Policy>(
-								MyExactSync2Policy(queueSize_),
+								MyExactSync2Policy(syncQueueSize_),
 								rgbd_image1_sub_,
 								rgbd_image2_sub_);
 						exactSync2_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD2, this, boost::placeholders::_1, boost::placeholders::_2));
@@ -159,7 +192,7 @@ private:
 					if(approxSync)
 					{
 						approxSync3_ = new message_filters::Synchronizer<MyApproxSync3Policy>(
-								MyApproxSync3Policy(queueSize_),
+								MyApproxSync3Policy(syncQueueSize_),
 								rgbd_image1_sub_,
 								rgbd_image2_sub_,
 								rgbd_image3_sub_);
@@ -170,7 +203,7 @@ private:
 					else
 					{
 						exactSync3_ = new message_filters::Synchronizer<MyExactSync3Policy>(
-								MyExactSync3Policy(queueSize_),
+								MyExactSync3Policy(syncQueueSize_),
 								rgbd_image1_sub_,
 								rgbd_image2_sub_,
 								rgbd_image3_sub_);
@@ -189,7 +222,7 @@ private:
 					if(approxSync)
 					{
 						approxSync4_ = new message_filters::Synchronizer<MyApproxSync4Policy>(
-								MyApproxSync4Policy(queueSize_),
+								MyApproxSync4Policy(syncQueueSize_),
 								rgbd_image1_sub_,
 								rgbd_image2_sub_,
 								rgbd_image3_sub_,
@@ -201,7 +234,7 @@ private:
 					else
 					{
 						exactSync4_ = new message_filters::Synchronizer<MyExactSync4Policy>(
-								MyExactSync4Policy(queueSize_),
+								MyExactSync4Policy(syncQueueSize_),
 								rgbd_image1_sub_,
 								rgbd_image2_sub_,
 								rgbd_image3_sub_,
@@ -217,15 +250,94 @@ private:
 							rgbd_image3_sub_.getTopic().c_str(),
 							rgbd_image4_sub_.getTopic().c_str());
 				}
+				else if(rgbdCameras == 5)
+				{
+					if(approxSync)
+					{
+						approxSync5_ = new message_filters::Synchronizer<MyApproxSync5Policy>(
+								MyApproxSync5Policy(syncQueueSize_),
+								rgbd_image1_sub_,
+								rgbd_image2_sub_,
+								rgbd_image3_sub_,
+								rgbd_image4_sub_,
+								rgbd_image5_sub_);
+						if(approxSyncMaxInterval > 0.0)
+							approxSync5_->setMaxIntervalDuration(ros::Duration(approxSyncMaxInterval));
+						approxSync5_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD5, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4, boost::placeholders::_5));
+					}
+					else
+					{
+						exactSync5_ = new message_filters::Synchronizer<MyExactSync5Policy>(
+								MyExactSync5Policy(syncQueueSize_),
+								rgbd_image1_sub_,
+								rgbd_image2_sub_,
+								rgbd_image3_sub_,
+								rgbd_image4_sub_,
+								rgbd_image5_sub_);
+						exactSync5_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD5, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4, boost::placeholders::_5));
+					}
+					subscribedTopicsMsg = uFormat("\n%s subscribed to (%s sync%s):\n   %s \\\n   %s \\\n   %s \\\n   %s \\\n   %s",
+							getName().c_str(),
+							approxSync?"approx":"exact",
+							approxSync&&approxSyncMaxInterval!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval).c_str():"",
+							rgbd_image1_sub_.getTopic().c_str(),
+							rgbd_image2_sub_.getTopic().c_str(),
+							rgbd_image3_sub_.getTopic().c_str(),
+							rgbd_image4_sub_.getTopic().c_str(),
+							rgbd_image5_sub_.getTopic().c_str());
+				}
+				else if(rgbdCameras == 6)
+				{
+					if(approxSync)
+					{
+						approxSync6_ = new message_filters::Synchronizer<MyApproxSync6Policy>(
+								MyApproxSync6Policy(syncQueueSize_),
+								rgbd_image1_sub_,
+								rgbd_image2_sub_,
+								rgbd_image3_sub_,
+								rgbd_image4_sub_,
+								rgbd_image5_sub_,
+								rgbd_image6_sub_);
+						if(approxSyncMaxInterval > 0.0)
+							approxSync6_->setMaxIntervalDuration(ros::Duration(approxSyncMaxInterval));
+						approxSync6_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD6, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4, boost::placeholders::_5, boost::placeholders::_6));
+					}
+					else
+					{
+						exactSync6_ = new message_filters::Synchronizer<MyExactSync6Policy>(
+								MyExactSync6Policy(syncQueueSize_),
+								rgbd_image1_sub_,
+								rgbd_image2_sub_,
+								rgbd_image3_sub_,
+								rgbd_image4_sub_,
+								rgbd_image5_sub_,
+								rgbd_image6_sub_);
+						exactSync6_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD6, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4, boost::placeholders::_5, boost::placeholders::_6));
+					}
+					subscribedTopicsMsg = uFormat("\n%s subscribed to (%s sync%s):\n   %s \\\n   %s \\\n   %s \\\n   %s \\\n   %s \\\n   %s",
+							getName().c_str(),
+							approxSync?"approx":"exact",
+							approxSync&&approxSyncMaxInterval!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval).c_str():"",
+							rgbd_image1_sub_.getTopic().c_str(),
+							rgbd_image2_sub_.getTopic().c_str(),
+							rgbd_image3_sub_.getTopic().c_str(),
+							rgbd_image4_sub_.getTopic().c_str(),
+							rgbd_image5_sub_.getTopic().c_str(),
+							rgbd_image6_sub_.getTopic().c_str());
+				}
 				else
 				{
-					ROS_FATAL("%s doesn't support more than 4 cameras (rgbd_cameras=%d) with internal synchronization interface, set rgbd_cameras=0 and use rgbd_images input topic instead for more cameras.", getName().c_str(), rgbdCameras);
+					NODELET_FATAL("%s doesn't support more than 6 cameras (rgbd_cameras=%d) with "
+								  "internal synchronization interface, set rgbd_cameras=0 and use "
+								  "rgbd_images input topic instead for more cameras (for which "
+								  "rgbdx_sync node can sync up to 8 cameras).",
+								  getName().c_str(), rgbdCameras);
 				}
 
 			}
 			else if(rgbdCameras == 0)
 			{
-				rgbdxSub_ = nh.subscribe("rgbd_images", 1, &StereoOdometry::callbackRGBDX, this);
+				rgbdxSub_ = nh.subscribe("rgbd_images", topicQueueSize_, &StereoOdometry::callbackRGBDX, this);
 
 				subscribedTopicsMsg =
 						uFormat("\n%s subscribed to:\n   %s",
@@ -234,7 +346,7 @@ private:
 			}
 			else
 			{
-				rgbdSub_ = nh.subscribe("rgbd_image", 1, &StereoOdometry::callbackRGBD, this);
+				rgbdSub_ = nh.subscribe("rgbd_image", topicQueueSize_, &StereoOdometry::callbackRGBD, this);
 
 				subscribedTopicsMsg =
 						uFormat("\n%s subscribed to:\n   %s",
@@ -253,25 +365,25 @@ private:
 			image_transport::TransportHints hintsLeft("raw", ros::TransportHints(), left_pnh);
 			image_transport::TransportHints hintsRight("raw", ros::TransportHints(), right_pnh);
 
-			imageRectLeft_.subscribe(left_it, left_nh.resolveName("image_rect"), 1, hintsLeft);
-			imageRectRight_.subscribe(right_it, right_nh.resolveName("image_rect"), 1, hintsRight);
-			cameraInfoLeft_.subscribe(left_nh, "camera_info", 1);
-			cameraInfoRight_.subscribe(right_nh, "camera_info", 1);
+			imageRectLeft_.subscribe(left_it, left_nh.resolveName("image_rect"), topicQueueSize_, hintsLeft);
+			imageRectRight_.subscribe(right_it, right_nh.resolveName("image_rect"), topicQueueSize_, hintsRight);
+			cameraInfoLeft_.subscribe(left_nh, "camera_info", topicQueueSize_);
+			cameraInfoRight_.subscribe(right_nh, "camera_info", topicQueueSize_);
 
 			if(approxSync)
 			{
-				approxSync_ = new message_filters::Synchronizer<MyApproxSyncPolicy>(MyApproxSyncPolicy(queueSize_), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_);
+				approxSync_ = new message_filters::Synchronizer<MyApproxSyncPolicy>(MyApproxSyncPolicy(syncQueueSize_), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_);
 				if(approxSyncMaxInterval>0.0)
 					approxSync_->setMaxIntervalDuration(ros::Duration(approxSyncMaxInterval));
 				approxSync_->registerCallback(boost::bind(&StereoOdometry::callback, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4));
 			}
 			else
 			{
-				exactSync_ = new message_filters::Synchronizer<MyExactSyncPolicy>(MyExactSyncPolicy(queueSize_), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_);
+				exactSync_ = new message_filters::Synchronizer<MyExactSyncPolicy>(MyExactSyncPolicy(syncQueueSize_), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_);
 				exactSync_->registerCallback(boost::bind(&StereoOdometry::callback, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4));
 			}
 
-
+			subscribedTopic = left_nh.resolveName("image_rect");
 			subscribedTopicsMsg = uFormat("\n%s subscribed to (%s sync%s):\n   %s \\\n   %s \\\n   %s \\\n   %s",
 					getName().c_str(),
 					approxSync?"approx":"exact",
@@ -282,7 +394,7 @@ private:
 					cameraInfoRight_.getTopic().c_str());
 		}
 
-		this->startWarningThread(subscribedTopicsMsg, approxSync);
+		initDiagnosticMsg(subscribedTopicsMsg, approxSync, subscribedTopic);
 	}
 
 	virtual void updateParameters(ParametersMap & parameters)
@@ -578,7 +690,6 @@ private:
 				const sensor_msgs::CameraInfoConstPtr& cameraInfoLeft,
 				const sensor_msgs::CameraInfoConstPtr& cameraInfoRight)
 	{
-		callbackCalled();
 		if(!this->isPaused())
 		{
 			std::vector<cv_bridge::CvImageConstPtr> leftMsgs(1);
@@ -609,7 +720,6 @@ private:
 	void callbackRGBD(
 			const rtabmap_msgs::RGBDImageConstPtr& image)
 	{
-		callbackCalled();
 		if(!this->isPaused())
 		{
 			std::vector<cv_bridge::CvImageConstPtr> leftMsgs(1);
@@ -627,7 +737,6 @@ private:
 	void callbackRGBDX(
 			const rtabmap_msgs::RGBDImagesConstPtr& images)
 	{
-		callbackCalled();
 		if(!this->isPaused())
 		{
 			if(images->rgbd_images.empty())
@@ -654,7 +763,6 @@ private:
 			const rtabmap_msgs::RGBDImageConstPtr& image,
 			const rtabmap_msgs::RGBDImageConstPtr& image2)
 	{
-		callbackCalled();
 		if(!this->isPaused())
 		{
 			std::vector<cv_bridge::CvImageConstPtr> leftMsgs(2);
@@ -677,7 +785,6 @@ private:
 			const rtabmap_msgs::RGBDImageConstPtr& image2,
 			const rtabmap_msgs::RGBDImageConstPtr& image3)
 	{
-		callbackCalled();
 		if(!this->isPaused())
 		{
 			std::vector<cv_bridge::CvImageConstPtr> leftMsgs(3);
@@ -704,7 +811,6 @@ private:
 			const rtabmap_msgs::RGBDImageConstPtr& image3,
 			const rtabmap_msgs::RGBDImageConstPtr& image4)
 	{
-		callbackCalled();
 		if(!this->isPaused())
 		{
 			std::vector<cv_bridge::CvImageConstPtr> leftMsgs(4);
@@ -728,6 +834,76 @@ private:
 		}
 	}
 
+	void callbackRGBD5(
+			const rtabmap_msgs::RGBDImageConstPtr& image,
+			const rtabmap_msgs::RGBDImageConstPtr& image2,
+			const rtabmap_msgs::RGBDImageConstPtr& image3,
+			const rtabmap_msgs::RGBDImageConstPtr& image4,
+			const rtabmap_msgs::RGBDImageConstPtr& image5)
+	{
+		if(!this->isPaused())
+		{
+			std::vector<cv_bridge::CvImageConstPtr> leftMsgs(5);
+			std::vector<cv_bridge::CvImageConstPtr> rightMsgs(5);
+			std::vector<sensor_msgs::CameraInfo> leftInfoMsgs;
+			std::vector<sensor_msgs::CameraInfo> rightInfoMsgs;
+			rtabmap_conversions::toCvShare(image, leftMsgs[0], rightMsgs[0]);
+			rtabmap_conversions::toCvShare(image2, leftMsgs[1], rightMsgs[1]);
+			rtabmap_conversions::toCvShare(image3, leftMsgs[2], rightMsgs[2]);
+			rtabmap_conversions::toCvShare(image4, leftMsgs[3], rightMsgs[3]);
+			rtabmap_conversions::toCvShare(image5, leftMsgs[4], rightMsgs[4]);
+			leftInfoMsgs.push_back(image->rgb_camera_info);
+			leftInfoMsgs.push_back(image2->rgb_camera_info);
+			leftInfoMsgs.push_back(image3->rgb_camera_info);
+			leftInfoMsgs.push_back(image4->rgb_camera_info);
+			leftInfoMsgs.push_back(image5->rgb_camera_info);
+			rightInfoMsgs.push_back(image->depth_camera_info);
+			rightInfoMsgs.push_back(image2->depth_camera_info);
+			rightInfoMsgs.push_back(image3->depth_camera_info);
+			rightInfoMsgs.push_back(image4->depth_camera_info);
+			rightInfoMsgs.push_back(image5->depth_camera_info);
+
+			this->commonCallback(leftMsgs, rightMsgs, leftInfoMsgs, rightInfoMsgs);
+		}
+	}
+
+	void callbackRGBD6(
+			const rtabmap_msgs::RGBDImageConstPtr& image,
+			const rtabmap_msgs::RGBDImageConstPtr& image2,
+			const rtabmap_msgs::RGBDImageConstPtr& image3,
+			const rtabmap_msgs::RGBDImageConstPtr& image4,
+			const rtabmap_msgs::RGBDImageConstPtr& image5,
+			const rtabmap_msgs::RGBDImageConstPtr& image6)
+	{
+		if(!this->isPaused())
+		{
+			std::vector<cv_bridge::CvImageConstPtr> leftMsgs(6);
+			std::vector<cv_bridge::CvImageConstPtr> rightMsgs(6);
+			std::vector<sensor_msgs::CameraInfo> leftInfoMsgs;
+			std::vector<sensor_msgs::CameraInfo> rightInfoMsgs;
+			rtabmap_conversions::toCvShare(image, leftMsgs[0], rightMsgs[0]);
+			rtabmap_conversions::toCvShare(image2, leftMsgs[1], rightMsgs[1]);
+			rtabmap_conversions::toCvShare(image3, leftMsgs[2], rightMsgs[2]);
+			rtabmap_conversions::toCvShare(image4, leftMsgs[3], rightMsgs[3]);
+			rtabmap_conversions::toCvShare(image5, leftMsgs[4], rightMsgs[4]);
+			rtabmap_conversions::toCvShare(image6, leftMsgs[5], rightMsgs[5]);
+			leftInfoMsgs.push_back(image->rgb_camera_info);
+			leftInfoMsgs.push_back(image2->rgb_camera_info);
+			leftInfoMsgs.push_back(image3->rgb_camera_info);
+			leftInfoMsgs.push_back(image4->rgb_camera_info);
+			leftInfoMsgs.push_back(image5->rgb_camera_info);
+			leftInfoMsgs.push_back(image6->rgb_camera_info);
+			rightInfoMsgs.push_back(image->depth_camera_info);
+			rightInfoMsgs.push_back(image2->depth_camera_info);
+			rightInfoMsgs.push_back(image3->depth_camera_info);
+			rightInfoMsgs.push_back(image4->depth_camera_info);
+			rightInfoMsgs.push_back(image5->depth_camera_info);
+			rightInfoMsgs.push_back(image6->depth_camera_info);
+
+			this->commonCallback(leftMsgs, rightMsgs, leftInfoMsgs, rightInfoMsgs);
+		}
+	}
+
 protected:
 	virtual void flushCallbacks()
 	{
@@ -735,20 +911,20 @@ protected:
 		if(approxSync_)
 		{
 			delete approxSync_;
-			approxSync_ = new message_filters::Synchronizer<MyApproxSyncPolicy>(MyApproxSyncPolicy(queueSize_), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_);
+			approxSync_ = new message_filters::Synchronizer<MyApproxSyncPolicy>(MyApproxSyncPolicy(syncQueueSize_), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_);
 			approxSync_->registerCallback(boost::bind(&StereoOdometry::callback, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4));
 		}
 		if(exactSync_)
 		{
 			delete exactSync_;
-			exactSync_ = new message_filters::Synchronizer<MyExactSyncPolicy>(MyExactSyncPolicy(queueSize_), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_);
+			exactSync_ = new message_filters::Synchronizer<MyExactSyncPolicy>(MyExactSyncPolicy(syncQueueSize_), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_);
 			exactSync_->registerCallback(boost::bind(&StereoOdometry::callback, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4));
 		}
 		if(approxSync2_)
 		{
 			delete approxSync2_;
 			approxSync2_ = new message_filters::Synchronizer<MyApproxSync2Policy>(
-					MyApproxSync2Policy(queueSize_),
+					MyApproxSync2Policy(syncQueueSize_),
 					rgbd_image1_sub_,
 					rgbd_image2_sub_);
 			approxSync2_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD2, this, boost::placeholders::_1, boost::placeholders::_2));
@@ -757,7 +933,7 @@ protected:
 		{
 			delete exactSync2_;
 			exactSync2_ = new message_filters::Synchronizer<MyExactSync2Policy>(
-					MyExactSync2Policy(queueSize_),
+					MyExactSync2Policy(syncQueueSize_),
 					rgbd_image1_sub_,
 					rgbd_image2_sub_);
 			exactSync2_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD2, this, boost::placeholders::_1, boost::placeholders::_2));
@@ -766,7 +942,7 @@ protected:
 		{
 			delete approxSync3_;
 			approxSync3_ = new message_filters::Synchronizer<MyApproxSync3Policy>(
-					MyApproxSync3Policy(queueSize_),
+					MyApproxSync3Policy(syncQueueSize_),
 					rgbd_image1_sub_,
 					rgbd_image2_sub_,
 					rgbd_image3_sub_);
@@ -776,7 +952,7 @@ protected:
 		{
 			delete exactSync3_;
 			exactSync3_ = new message_filters::Synchronizer<MyExactSync3Policy>(
-					MyExactSync3Policy(queueSize_),
+					MyExactSync3Policy(syncQueueSize_),
 					rgbd_image1_sub_,
 					rgbd_image2_sub_,
 					rgbd_image3_sub_);
@@ -786,7 +962,7 @@ protected:
 		{
 			delete approxSync4_;
 			approxSync4_ = new message_filters::Synchronizer<MyApproxSync4Policy>(
-					MyApproxSync4Policy(queueSize_),
+					MyApproxSync4Policy(syncQueueSize_),
 					rgbd_image1_sub_,
 					rgbd_image2_sub_,
 					rgbd_image3_sub_,
@@ -797,12 +973,62 @@ protected:
 		{
 			delete exactSync4_;
 			exactSync4_ = new message_filters::Synchronizer<MyExactSync4Policy>(
-					MyExactSync4Policy(queueSize_),
+					MyExactSync4Policy(syncQueueSize_),
 					rgbd_image1_sub_,
 					rgbd_image2_sub_,
 					rgbd_image3_sub_,
 					rgbd_image4_sub_);
 			exactSync4_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD4, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4));
+		}
+		if(approxSync5_)
+		{
+			delete approxSync5_;
+			approxSync5_ = new message_filters::Synchronizer<MyApproxSync5Policy>(
+					MyApproxSync5Policy(syncQueueSize_),
+					rgbd_image1_sub_,
+					rgbd_image2_sub_,
+					rgbd_image3_sub_,
+					rgbd_image4_sub_,
+					rgbd_image5_sub_);
+			approxSync5_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD5, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4, boost::placeholders::_5));
+		}
+		if(exactSync5_)
+		{
+			delete exactSync5_;
+			exactSync5_ = new message_filters::Synchronizer<MyExactSync5Policy>(
+					MyExactSync5Policy(syncQueueSize_),
+					rgbd_image1_sub_,
+					rgbd_image2_sub_,
+					rgbd_image3_sub_,
+					rgbd_image4_sub_,
+					rgbd_image5_sub_);
+			exactSync5_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD5, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4, boost::placeholders::_5));
+		}
+		if(approxSync6_)
+		{
+			delete approxSync6_;
+			approxSync6_ = new message_filters::Synchronizer<MyApproxSync6Policy>(
+					MyApproxSync6Policy(syncQueueSize_),
+					rgbd_image1_sub_,
+					rgbd_image2_sub_,
+					rgbd_image3_sub_,
+					rgbd_image4_sub_,
+					rgbd_image5_sub_,
+					rgbd_image6_sub_);
+			approxSync6_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD6, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4, boost::placeholders::_5, boost::placeholders::_6));
+		}
+		if(exactSync6_)
+		{
+			delete exactSync6_;
+			exactSync6_ = new message_filters::Synchronizer<MyExactSync6Policy>(
+					MyExactSync6Policy(syncQueueSize_),
+					rgbd_image1_sub_,
+					rgbd_image2_sub_,
+					rgbd_image3_sub_,
+					rgbd_image4_sub_,
+					rgbd_image5_sub_,
+					rgbd_image6_sub_);
+			exactSync6_->registerCallback(boost::bind(&StereoOdometry::callbackRGBD6, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4, boost::placeholders::_5, boost::placeholders::_6));
 		}
 	}
 
@@ -819,6 +1045,7 @@ private:
 	message_filters::Subscriber<rtabmap_msgs::RGBDImage> rgbd_image3_sub_;
 	message_filters::Subscriber<rtabmap_msgs::RGBDImage> rgbd_image4_sub_;
 	message_filters::Subscriber<rtabmap_msgs::RGBDImage> rgbd_image5_sub_;
+	message_filters::Subscriber<rtabmap_msgs::RGBDImage> rgbd_image6_sub_;
 
 	typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo, sensor_msgs::CameraInfo> MyApproxSyncPolicy;
 	message_filters::Synchronizer<MyApproxSyncPolicy> * approxSync_;
@@ -836,8 +1063,17 @@ private:
 	message_filters::Synchronizer<MyApproxSync4Policy> * approxSync4_;
 	typedef message_filters::sync_policies::ExactTime<rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage> MyExactSync4Policy;
 	message_filters::Synchronizer<MyExactSync4Policy> * exactSync4_;
+	typedef message_filters::sync_policies::ApproximateTime<rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage> MyApproxSync5Policy;
+	message_filters::Synchronizer<MyApproxSync5Policy> * approxSync5_;
+	typedef message_filters::sync_policies::ExactTime<rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage> MyExactSync5Policy;
+	message_filters::Synchronizer<MyExactSync5Policy> * exactSync5_;
+	typedef message_filters::sync_policies::ApproximateTime<rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage> MyApproxSync6Policy;
+	message_filters::Synchronizer<MyApproxSync6Policy> * approxSync6_;
+	typedef message_filters::sync_policies::ExactTime<rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage, rtabmap_msgs::RGBDImage> MyExactSync6Policy;
+	message_filters::Synchronizer<MyExactSync6Policy> * exactSync6_;
 
-	int queueSize_;
+	int topicQueueSize_;
+	int syncQueueSize_;
 	bool keepColor_;
 };
 
