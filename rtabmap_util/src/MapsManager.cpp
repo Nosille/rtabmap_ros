@@ -363,7 +363,7 @@ void MapsManager::set2DMap(
 			if(!uContains(localMaps_.localGrids(), iter->first))
 			{
 				rtabmap::SensorData data;
-				data = memory->getNodeData(iter->first, false, false, false, true);
+				data = memory->getNodeData(iter->first, false, false, false, false, true);
 				if(data.gridCellSize() == 0.0f)
 				{
 					ROS_WARN("Local occupancy grid doesn't exist for node %d", iter->first);
@@ -581,7 +581,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 					}
 					else if(memory)
 					{
-						data = memory->getNodeData(iter->first, localMapMaker_->isGridFromDepth() && !occupancySavedInDB, !localMapMaker_->isGridFromDepth() && !occupancySavedInDB, false, true);
+						data = memory->getNodeData(iter->first, localMapMaker_->isGridFromDepth() && !occupancySavedInDB, !localMapMaker_->isGridFromDepth() && !occupancySavedInDB, false, false, true);
 					}
 
 					ROS_DEBUG("Adding grid map %d to cache...", iter->first);
@@ -610,7 +610,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 						{
 							// if we are here, it is because we loaded a database with old nodes not having occupancy grid set
 							// try reload again
-							data = memory->getNodeData(iter->first, localMapMaker_->isGridFromDepth(), !localMapMaker_->isGridFromDepth(), false, false);
+							data = memory->getNodeData(iter->first, localMapMaker_->isGridFromDepth(), !localMapMaker_->isGridFromDepth(), false, false, false);
 						}
 						data.uncompressData(
 								localMapMaker_->isGridFromDepth() && generateGrid?&rgb:0,

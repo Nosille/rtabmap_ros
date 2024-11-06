@@ -3300,6 +3300,7 @@ bool CoreWrapper::getNodeDataCallback(rtabmap_msgs::GetNodeData::Request& req, r
 			(int)req.ids.size(),
 			req.images?"true":"false",
 			req.scan?"true":"false",
+			req.pointCloud2?"true":"false",
 			req.grid?"true":"false",
 			req.user_data?"true":"false");
 
@@ -3310,7 +3311,7 @@ bool CoreWrapper::getNodeDataCallback(rtabmap_msgs::GetNodeData::Request& req, r
 	for(size_t i=0; i<req.ids.size(); ++i)
 	{
 		int id = req.ids[i];
-		Signature s = rtabmap_.getSignatureCopy(id, req.images, req.scan, req.user_data, req.grid, true, true);
+		Signature s = rtabmap_.getSignatureCopy(id, req.images, req.scan, req.pointCloud2, req.user_data, req.grid, true, true);
 
 		if(s.id()>0)
 		{

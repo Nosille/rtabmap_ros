@@ -146,7 +146,7 @@ void mapDataCallback(const rtabmap_msgs::MapDataConstPtr & mapDataMsg)
 		else if(!node.sensorData().userDataCompressed().empty())
 		{
 			cv::Mat data;
-			node.sensorData().uncompressDataConst(0 ,0, 0, &data);
+			node.sensorData().uncompressDataConst(0 ,0, 0, 0, &data);
 
 			if(data.type() == CV_64FC1 && data.rows == 1 && data.cols == 2)
 			{
