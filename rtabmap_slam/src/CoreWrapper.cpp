@@ -80,6 +80,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "rtabmap_conversions/MsgConversion.h"
 
+#include <tf2_sensor_msgs/tf2_sensor_msgs.h>
+#include <tf2_eigen/tf2_eigen.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+
 using namespace rtabmap;
 
 namespace rtabmap_slam {
@@ -3694,8 +3698,8 @@ bool CoreWrapper::publishMapCallback(rtabmap_msgs::PublishMap::Request& req, rta
 							marker.pose.orientation.y = 0.0;
 							marker.pose.orientation.z = 0.0;
 							marker.pose.orientation.w = 1.0;
-							marker.scale.x = 1;
-							marker.scale.y = 1;
+							marker.scale.x = 2;
+							marker.scale.y = 2;
 							marker.scale.z = 0.2;
 							marker.color.a = 0.5;
 							marker.color.r = 1.0;
@@ -4336,8 +4340,23 @@ void CoreWrapper::publishCurrentGoal(const ros::Time & stamp)
 		poseMsg.header.stamp = stamp;
 		rtabmap_conversions::transformToPoseMsg(currentMetricGoal_, poseMsg.pose);
 
+		// force goals into 2D for move_base
+		poseMsg.pose.position.z = 0.0;
+
+		tf2::Quaternion q;
+    	tf2::convert(poseMsg.pose.orientation, q);
+        tf2::Matrix3x3 m(q);
+        double roll,pitch,yaw;
+        m.getRPY(roll,pitch,yaw);
+
+		tf2::Quaternion q2;
+		q2.setRPY(0.0,0.0,yaw);
+        tf2::convert(q2, poseMsg.pose.orientation);
+		// if(q2.z() < 0)  = -1 * q2.z;
+		
 		if(useActionForGoal_)
 		{
+			ROS_INFO_STREAM("useActionForGoal");
 			if(mbClient_ == 0 || !mbClient_->isServerConnected())
 			{
 				NODELET_INFO("Connecting to move_base action server...");
@@ -4353,9 +4372,9 @@ void CoreWrapper::publishCurrentGoal(const ros::Time & stamp)
 				goal.target_pose = poseMsg;
 
 				mbClient_->sendGoal(goal,
-						boost::bind(&CoreWrapper::goalDoneCb, this, boost::placeholders::_1, boost::placeholders::_2),
+						boost::bind(&CoreWrapper::goalDoneCb, this, _1, _2),
 						boost::bind(&CoreWrapper::goalActiveCb, this),
-						boost::bind(&CoreWrapper::goalFeedbackCb, this, boost::placeholders::_1));
+						boost::bind(&CoreWrapper::goalFeedbackCb, this, _1));
 				lastPublishedMetricGoal_ = currentMetricGoal_;
 			}
 			else
