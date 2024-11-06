@@ -7,7 +7,7 @@ find_package(catkin REQUIRED COMPONENTS
              image_geometry rtabmap_msgs
 )
 
-find_package(RTABMap 0.21.5 REQUIRED)
+find_package(RTABMap 1.0.0 REQUIRED)
 find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
 
 catkin_package(

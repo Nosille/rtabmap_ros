@@ -578,7 +578,8 @@ void GuiWrapper::commonMultiCameraCallback(
 	cv::Mat depth;
 	std::vector<rtabmap::CameraModel> cameraModels;
 	std::vector<rtabmap::StereoCameraModel> stereoCameraModels;
-	LaserScan scan;
+	rtabmap::LaserScan scan;
+	rtabmap::PointCloud2 pointCloud2;
 	rtabmap::OdometryInfo info;
 	bool ignoreData = false;
 
@@ -640,6 +641,7 @@ void GuiWrapper::commonMultiCameraCallback(
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
 					scan,
+					pointCloud2,
 					tfListener_,
 					waitForTransform_?waitForTransformDuration_:0))
 			{
@@ -769,7 +771,8 @@ void GuiWrapper::commonStereoCallback(
 
 	cv::Mat left;
 	cv::Mat right;
-	LaserScan scan;
+	rtabmap::LaserScan scan;
+	rtabmap::PointCloud2 pointCloud2;
 	rtabmap::StereoCameraModel stereoModel;
 	rtabmap::OdometryInfo info;
 	bool ignoreData = false;
@@ -828,6 +831,7 @@ void GuiWrapper::commonStereoCallback(
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
 					scan,
+					pointCloud2,
 					tfListener_,
 					waitForTransform_?waitForTransformDuration_:0))
 			{
@@ -940,7 +944,8 @@ void GuiWrapper::commonLaserScanCallback(
 		return;
 	}
 
-	LaserScan scan;
+	rtabmap::LaserScan scan;
+	rtabmap::PointCloud2 pointCloud2;
 	rtabmap::OdometryInfo info;
 	bool ignoreData = false;
 
@@ -975,6 +980,7 @@ void GuiWrapper::commonLaserScanCallback(
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
 					scan,
+					pointCloud2,
 					tfListener_,
 					waitForTransform_?waitForTransformDuration_:0))
 			{

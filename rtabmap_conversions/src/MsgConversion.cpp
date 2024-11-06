@@ -2728,6 +2728,7 @@ bool convertScan3dMsg(
 		const std::string & odomFrameId,
 		const ros::Time & odomStamp,
 		rtabmap::LaserScan & scan,
+		rtabmap::PointCloud2 & pointCloud2,
 		tf::TransformListener & listener,
 		double waitForTransform,
 		int maxPoints,
@@ -2766,6 +2767,11 @@ bool convertScan3dMsg(
 	}
 	scan = rtabmap::util3d::laserScanFromPointCloud(scan3dMsg, true, is2D);
 	scan = rtabmap::LaserScan(scan, maxPoints, maxRange, scanLocalTransform);
+	
+	pcl::PCLPointCloud2 pcl_cloud;
+	pcl_conversions::toPCL(scan3dMsg, pcl_cloud);
+	pointCloud2 = rtabmap::PointCloud2(pcl_cloud);
+	
 	return true;
 }
 

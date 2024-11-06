@@ -2,6 +2,7 @@
 int32[] ids
 bool images
 bool scan
+bool pointCloud2
 bool grid
 bool user_data
 ---

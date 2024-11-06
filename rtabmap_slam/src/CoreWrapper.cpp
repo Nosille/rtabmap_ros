@@ -1395,7 +1395,8 @@ void CoreWrapper::commonMultiCameraCallbackImpl(
 		}
 	}
 
-	LaserScan scan;
+	rtabmap::LaserScan scan;
+	rtabmap::PointCloud2 pointCloud2;
 	bool genMaxScanPts = 0;
 	if(scan2dMsg.ranges.empty() && scan3dMsg.data.empty() && !depth.empty() && stereoCameraModels.empty() && genScan_)
 	{
@@ -1433,6 +1434,7 @@ void CoreWrapper::commonMultiCameraCallbackImpl(
 				odomSensorSync_?odomFrameId:"",
 				lastPoseStamp_,
 				scan,
+		        pointCloud2,				
 				tfListener_,
 				waitForTransform_?waitForTransformDuration_:0,
 				scanCloudMaxPoints_,
@@ -1614,7 +1616,8 @@ void CoreWrapper::commonLaserScanCallback(
 		return;
 	}
 
-	LaserScan scan;
+	rtabmap::LaserScan scan;
+	rtabmap::PointCloud2 pointCloud2;
 	if(!scan2dMsg.ranges.empty())
 	{
 		if(!rtabmap_conversions::convertScanMsg(
@@ -1640,6 +1643,7 @@ void CoreWrapper::commonLaserScanCallback(
 				odomSensorSync_?odomFrameId:"",
 				lastPoseStamp_,
 				scan,
+				pointCloud2,
 				tfListener_,
 				waitForTransform_?waitForTransformDuration_:0,
 				scanCloudMaxPoints_,
@@ -1671,6 +1675,7 @@ void CoreWrapper::commonLaserScanCallback(
 
 	SensorData data(
 			scan,
+			pointCloud2,
 			cv::Mat(),
 			cv::Mat(),
 			rtabmap::CameraModel(),

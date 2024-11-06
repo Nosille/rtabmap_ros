@@ -269,6 +269,7 @@ bool convertScan3dMsg(
 		const std::string & odomFrameId,
 		const ros::Time & odomStamp,
 		rtabmap::LaserScan & scan,
+		rtabmap::PointCloud2 & pointCloud2,
 		tf::TransformListener & listener,
 		double waitForTransform,
 		int maxPoints = 0,
