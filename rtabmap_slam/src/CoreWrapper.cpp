@@ -1517,6 +1517,7 @@ void CoreWrapper::commonMultiCameraCallbackImpl(
 	{
 		data = SensorData(
 				scan,
+				pointCloud2,
 				rgb,
 				depth,
 				stereoCameraModels,
@@ -1528,6 +1529,7 @@ void CoreWrapper::commonMultiCameraCallbackImpl(
 	{
 		data = SensorData(
 				scan,
+				pointCloud2,
 				rgb,
 				depth,
 				cameraModels,

@@ -2790,7 +2790,7 @@ bool convertScan3dMsg(
 	
 	pcl::PCLPointCloud2 pcl_cloud;
 	pcl_conversions::toPCL(scan3dMsg, pcl_cloud);
-	pointCloud2 = rtabmap::PointCloud2(pcl_cloud);
+	pointCloud2 = rtabmap::PointCloud2(pcl_cloud, scanLocalTransform);
 	
 	return true;
 }
