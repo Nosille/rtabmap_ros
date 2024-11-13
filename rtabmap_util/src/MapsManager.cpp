@@ -376,6 +376,7 @@ void MapsManager::set2DMap(
 							0,
 							0,
 							0,
+							0,
 							&ground,
 							&obstacles,
 							&emptyCells);
@@ -617,6 +618,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 								localMapMaker_->isGridFromDepth() && generateGrid?&depth:0,
 								!localMapMaker_->isGridFromDepth() && generateGrid?&scan:0,
 								0,
+								0,
 								generateGrid?0:&ground,
 								generateGrid?0:&obstacles,
 								generateGrid?0:&emptyCells);
@@ -654,6 +656,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 							localMapMaker_->isGridFromDepth() && generateGrid?&rgb:0,
 							localMapMaker_->isGridFromDepth() && generateGrid?&depth:0,
 							!localMapMaker_->isGridFromDepth() && generateGrid?&scan:0,
+							0,
 							0,
 							generateGrid?0:&ground,
 							generateGrid?0:&obstacles,
