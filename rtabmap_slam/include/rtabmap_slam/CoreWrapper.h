@@ -306,6 +306,7 @@ private:
 	ros::Publisher localGridObstacle_;
 	ros::Publisher localGridEmpty_;
 	ros::Publisher localGridGround_;
+	ros::Publisher localUserPC2_;
 	ros::Publisher localizationPosePub_;
 	ros::Subscriber initialPoseSub_;
 

@@ -292,6 +292,7 @@ void CoreWrapper::onInit()
 	localGridObstacle_ = nh.advertise<sensor_msgs::PointCloud2>("local_grid_obstacle", 1);
 	localGridEmpty_ = nh.advertise<sensor_msgs::PointCloud2>("local_grid_empty", 1);
 	localGridGround_ = nh.advertise<sensor_msgs::PointCloud2>("local_grid_ground", 1);
+	localUserPC2_ = nh.advertise<sensor_msgs::PointCloud2>("local_user_pc2", 1);
 	localizationPosePub_ = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>("localization_pose", 1);
 	initialPoseSub_ = nh.subscribe("initialpose", 1, &CoreWrapper::initialPoseCallback, this);
 
@@ -4182,6 +4183,20 @@ void CoreWrapper::publishStats(const ros::Time & stamp)
 		msg.header.stamp = stamp;
 		msg.header.frame_id = frameId_;
 		localGridGround_.publish(msg);
+	}
+	if(localUserPC2_.getNumSubscribers() && !stats.getLastSignatureData().sensorData().pointCloud2Raw().empty())
+	{
+		rtabmap::PointCloud2 pointCloud2 = stats.getLastSignatureData().sensorData().pointCloud2Raw();
+		pcl::PCLPointCloud2::Ptr cloud = pcl::make_shared<pcl::PCLPointCloud2>(pointCloud2.cloud());
+		ROS_INFO_STREAM("cloud size: " << cloud->height << ":" << cloud->width);
+		rtabmap::Transform localTransform = pointCloud2.localTransform();
+		ROS_INFO_STREAM("localTransform: " << localTransform.x() << ":" << localTransform.y() << ":" << localTransform.z());
+		cloud = util3d::transformPointCloud(cloud, localTransform);
+		sensor_msgs::PointCloud2 msg;
+		pcl_conversions::moveFromPCL(*cloud, msg);
+		msg.header.stamp = stamp;
+		msg.header.frame_id = frameId_;
+		localUserPC2_.publish(msg);
 	}
 
 	bool pubLabels = labelsPub_.getNumSubscribers();
