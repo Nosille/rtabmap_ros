@@ -8,6 +8,7 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 find_package(RTABMap 0.21.5 REQUIRED)
+find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
 
 catkin_package(
   INCLUDE_DIRS include
