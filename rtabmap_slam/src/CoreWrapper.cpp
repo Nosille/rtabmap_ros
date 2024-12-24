@@ -4392,9 +4392,9 @@ void CoreWrapper::publishCurrentGoal(const ros::Time & stamp)
 				goal.target_pose = poseMsg;
 
 				mbClient_->sendGoal(goal,
-						boost::bind(&CoreWrapper::goalDoneCb, this, _1, _2),
+						boost::bind(&CoreWrapper::goalDoneCb, this, boost::placeholders::_1, boost::placeholders::_2),
 						boost::bind(&CoreWrapper::goalActiveCb, this),
-						boost::bind(&CoreWrapper::goalFeedbackCb, this, _1));
+						boost::bind(&CoreWrapper::goalFeedbackCb, this, boost::placeholders::_1));
 				lastPublishedMetricGoal_ = currentMetricGoal_;
 			}
 			else
