@@ -39,12 +39,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/core/Version.h>
 #include <rtabmap/core/OccupancyGrid.h>
 #include <pcl/search/kdtree.h>
+#include <pcl/filters/impl/extract_indices.hpp>
 
 #include <nav_msgs/OccupancyGrid.h>
 #include <ros/ros.h>
 
 #include <pcl_conversions/pcl_conversions.h>
 #include <rtabmap/core/LocalGridMaker.h>
+#include <rtabmap/core/LocalCloudMaker.h>
 
 #if defined(WITH_OCTOMAP_MSGS) and defined(RTABMAP_OCTOMAP)
 #include <octomap_msgs/conversions.h>
@@ -72,18 +74,19 @@ MapsManager::MapsManager() :
 		scanEmptyRayTracing_(true),
 		assembledObstacles_(new pcl::PointCloud<pcl::PointXYZRGB>),
 		assembledGround_(new pcl::PointCloud<pcl::PointXYZRGB>),
-		occupancyGrid_(new OccupancyGrid(&localMaps_)),
-		localMapMaker_(new LocalGridMaker),
+		occupancyGrid_(new OccupancyGrid(&localGrids_)),
+		localGridMaker_(new LocalGridMaker),
+		localCloudMaker_(new LocalCloudMaker),		
 		gridUpdated_(true),
 #if defined(WITH_OCTOMAP_MSGS) and defined(RTABMAP_OCTOMAP)
-		octomap_(new OctoMap(&localMaps_)),
+		octomap_(new OctoMap(&localGrids_)),
 #else
 		octomap_(0),
 #endif
 		octomapTreeDepth_(16),
 		octomapUpdated_(true),
 #if defined(WITH_GRID_MAP_ROS) and defined(RTABMAP_GRIDMAP)
-		elevationMap_(new GridMap(&localMaps_)),
+		elevationMap_(new GridMap(&localGrids_)),
 #else
 		elevationMap_(0),
 #endif
@@ -222,7 +225,8 @@ MapsManager::~MapsManager() {
 	clear();
 
 	delete occupancyGrid_;
-	delete localMapMaker_;
+	delete localGridMaker_;
+	delete localCloudMaker_;
 
 #if defined(WITH_OCTOMAP_MSGS) and defined(RTABMAP_OCTOMAP)
 	delete octomap_;
@@ -330,18 +334,19 @@ void MapsManager::setParameters(const rtabmap::ParametersMap & parameters)
 {
 	parameters_ = parameters;
 	delete occupancyGrid_;
-	occupancyGrid_ = new OccupancyGrid(&localMaps_, parameters_);
+	occupancyGrid_ = new OccupancyGrid(&localGrids_, parameters_);
 	
-	localMapMaker_->parseParameters(parameters_);
+	localGridMaker_->parseParameters(parameters_);
+	localCloudMaker_->parseParameters(parameters_);
 
 #if defined(WITH_OCTOMAP_MSGS) and defined(RTABMAP_OCTOMAP)
 	delete octomap_;
-	octomap_ = new OctoMap(&localMaps_, parameters_);
+	octomap_ = new OctoMap(&localGrids_, parameters_);
 #endif
 
 #if defined(WITH_GRID_MAP_ROS) and defined(RTABMAP_GRIDMAP)
 	delete elevationMap_;
-	elevationMap_ = new GridMap(&localMaps_, parameters_);
+	elevationMap_ = new GridMap(&localGrids_, parameters_);
 #endif
 }
 
@@ -359,8 +364,8 @@ void MapsManager::set2DMap(
 	{
 		for(std::map<int, rtabmap::Transform>::const_iterator iter=poses.lower_bound(1); iter!=poses.end(); ++iter)
 		{
-			std::map<int, LocalGrid>::const_iterator jter = localMaps_.find(iter->first);
-			if(!uContains(localMaps_.localGrids(), iter->first))
+			std::map<int, LocalGrid>::const_iterator jter = localGrids_.find(iter->first);
+			if(!uContains(localGrids_.localGrids(), iter->first))
 			{
 				rtabmap::SensorData data;
 				data = memory->getNodeData(iter->first, false, false, false, false, true);
@@ -381,7 +386,7 @@ void MapsManager::set2DMap(
 							&obstacles,
 							&emptyCells);
 
-					localMaps_.add(iter->first, ground, obstacles, emptyCells, data.gridCellSize(), data.gridViewPoint());
+					localGrids_.add(iter->first, ground, obstacles, emptyCells, data.gridCellSize(), data.gridViewPoint());
 				}
 			}
 		}
@@ -390,7 +395,8 @@ void MapsManager::set2DMap(
 
 void MapsManager::clear()
 {
-	localMaps_.clear();
+	localGrids_.clear();
+	localClouds_.clear();
 	assembledGround_->clear();
 	assembledObstacles_->clear();
 	assembledGroundPoses_.clear();
@@ -459,12 +465,14 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 		const std::map<int, rtabmap::Transform> & posesIn,
 		const rtabmap::Memory * memory,
 		bool updateGrid,
+		bool updateCloud,
 		bool updateOctomap,
 		const std::map<int, rtabmap::Signature> & signatures)
 {
 	bool updateGridCache = updateGrid || updateOctomap;
+	bool updateCloudCache = updateCloud;
 	bool updateElevation = false;
-	if(!updateGrid && !updateOctomap && !updateOctomap)
+	if(!updateGrid && !updateCloud && !updateOctomap)
 	{
 		//  all false, update only those where we have subscribers
 		updateOctomap =
@@ -488,6 +496,11 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 				cloudObstaclesPub_.getNumSubscribers() != 0 ||
 				cloudGroundPub_.getNumSubscribers() != 0 ||
 				scanMapPub_.getNumSubscribers() != 0;
+
+		updateCloudCache = 
+				cloudMapPub_.getNumSubscribers() != 0 ||
+				cloudObstaclesPub_.getNumSubscribers() != 0 ||
+				cloudGroundPub_.getNumSubscribers() != 0;				
 	}
 
 #if not (defined(WITH_OCTOMAP_MSGS) and defined(RTABMAP_OCTOMAP))
@@ -523,7 +536,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 	std::map<int, rtabmap::Transform> filteredPoses;
 
 	// update cache
-	if(updateGridCache)
+	if(updateGridCache || updateCloudCache)
 	{
 		// filter nodes
 		if(mapFilterRadius_ > 0.0)
@@ -551,9 +564,14 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 		UTimer longUpdateTimer;
 		if(filteredPoses.size() > 20)
 		{
-			if(updateGridCache && localMaps_.size() < 5)
+			if(updateGridCache && localGrids_.size() < 5)
 			{
-				ROS_WARN("Many occupancy grids should be loaded (~%d), this may take a while to update the map(s)...", int(filteredPoses.size()-localMaps_.size()));
+				ROS_WARN("Many occupancy grids should be loaded (~%d), this may take a while to update the map(s)...", int(filteredPoses.size()-localGrids_.size()));
+				longUpdate = true;
+			}
+			if(updateCloudCache && localClouds_.size() < 5)
+			{
+				ROS_WARN("Many clouds should be loaded (~%d), this may take a while to update the map(s)...", int(filteredPoses.size()-localClouds_.size()));
 				longUpdate = true;
 			}
 #if defined(WITH_OCTOMAP_MSGS) and defined(RTABMAP_OCTOMAP)
@@ -572,9 +590,9 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 			if(!iter->second.isNull())
 			{
 				rtabmap::SensorData data;
-				if(updateGridCache && (iter->first == 0 || !uContains(localMaps_.localGrids(), iter->first)))
+				if(updateGridCache && (iter->first == 0 || !uContains(localGrids_.localGrids(), iter->first)))
 				{
-					ROS_DEBUG("Data required for %d", iter->first);
+					ROS_DEBUG("Grid data required for %d", iter->first);
 					std::map<int, rtabmap::Signature>::const_iterator findIter = signatures.find(iter->first);
 					if(findIter != signatures.end())
 					{
@@ -582,7 +600,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 					}
 					else if(memory)
 					{
-						data = memory->getNodeData(iter->first, localMapMaker_->isGridFromDepth() && !occupancySavedInDB, !localMapMaker_->isGridFromDepth() && !occupancySavedInDB, false, false, true);
+						data = memory->getNodeData(iter->first, localGridMaker_->isGridFromDepth() && !occupancySavedInDB, !localGridMaker_->isGridFromDepth() && !occupancySavedInDB, false, false, true);
 					}
 
 					ROS_DEBUG("Adding grid map %d to cache...", iter->first);
@@ -611,12 +629,12 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 						{
 							// if we are here, it is because we loaded a database with old nodes not having occupancy grid set
 							// try reload again
-							data = memory->getNodeData(iter->first, localMapMaker_->isGridFromDepth(), !localMapMaker_->isGridFromDepth(), false, false, false);
+							data = memory->getNodeData(iter->first, localGridMaker_->isGridFromDepth(), !localGridMaker_->isGridFromDepth(), false, false, false);
 						}
 						data.uncompressData(
-								localMapMaker_->isGridFromDepth() && generateGrid?&rgb:0,
-								localMapMaker_->isGridFromDepth() && generateGrid?&depth:0,
-								!localMapMaker_->isGridFromDepth() && generateGrid?&scan:0,
+								localGridMaker_->isGridFromDepth() && generateGrid?&rgb:0,
+								localGridMaker_->isGridFromDepth() && generateGrid?&depth:0,
+								!localGridMaker_->isGridFromDepth() && generateGrid?&scan:0,
 								0,
 								0,
 								generateGrid?0:&ground,
@@ -627,12 +645,12 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 						{
 							Signature tmp(data);
 							tmp.setPose(iter->second);
-							localMapMaker_->createLocalMap(tmp, ground, obstacles, emptyCells, viewPoint);
-							localMaps_.add(iter->first, ground, obstacles, emptyCells, localMapMaker_->getCellSize(), viewPoint);
+							localGridMaker_->createLocalMap(tmp, ground, obstacles, emptyCells, viewPoint);
+							localGrids_.add(iter->first, ground, obstacles, emptyCells, localGridMaker_->getCellSize(), viewPoint);
 						}
 						else
 						{
-							localMaps_.add(iter->first, ground, obstacles, emptyCells, data.gridCellSize(), data.gridViewPoint());
+							localGrids_.add(iter->first, ground, obstacles, emptyCells, data.gridCellSize(), data.gridViewPoint());
 						}
 					}
 					else
@@ -646,16 +664,16 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 						{
 							ParametersMap parameters;
 							parameters.insert(ParametersPair(Parameters::kGridScan2dUnknownSpaceFilled(), uBool2Str(scanEmptyRayTracing_)));
-							localMapMaker_->parseParameters(parameters);
+							localGridMaker_->parseParameters(parameters);
 						}
 
 						cv::Mat rgb, depth;
 						LaserScan scan;
 						bool generateGrid = data.gridCellSize() == 0.0f || (unknownSpaceFilled != scanEmptyRayTracing_ && scanEmptyRayTracing_);
 						data.uncompressData(
-							localMapMaker_->isGridFromDepth() && generateGrid?&rgb:0,
-							localMapMaker_->isGridFromDepth() && generateGrid?&depth:0,
-							!localMapMaker_->isGridFromDepth() && generateGrid?&scan:0,
+							localGridMaker_->isGridFromDepth() && generateGrid?&rgb:0,
+							localGridMaker_->isGridFromDepth() && generateGrid?&depth:0,
+							!localGridMaker_->isGridFromDepth() && generateGrid?&scan:0,
 							0,
 							0,
 							generateGrid?0:&ground,
@@ -666,12 +684,12 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 						{
 							Signature tmp(data);
 							tmp.setPose(iter->second);
-							localMapMaker_->createLocalMap(tmp, ground, obstacles, emptyCells, viewPoint);
-							localMaps_.add(iter->first, ground, obstacles, emptyCells, localMapMaker_->getCellSize(), viewPoint);
+							localGridMaker_->createLocalMap(tmp, ground, obstacles, emptyCells, viewPoint);
+							localGrids_.add(iter->first, ground, obstacles, emptyCells, localGridMaker_->getCellSize(), viewPoint);
 						}
 						else
 						{
-							localMaps_.add(iter->first, ground, obstacles, emptyCells, data.gridCellSize(), data.gridViewPoint());
+							localGrids_.add(iter->first, ground, obstacles, emptyCells, data.gridCellSize(), data.gridViewPoint());
 						}
 
 						// put back
@@ -679,10 +697,67 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 						{
 							ParametersMap parameters;
 							parameters.insert(ParametersPair(Parameters::kGridScan2dUnknownSpaceFilled(), uBool2Str(unknownSpaceFilled)));
-							localMapMaker_->parseParameters(parameters);
+							localGridMaker_->parseParameters(parameters);
 						}
 					}
 				}
+				if(updateCloudCache && (iter->first == 0 || !uContains(localClouds_.localClouds(), iter->first)))
+				{
+					ROS_DEBUG("Cloud data required for %d", iter->first);
+					std::map<int, rtabmap::Signature>::const_iterator findIter = signatures.find(iter->first);
+					if(findIter != signatures.end())
+					{
+						data = findIter->second.sensorData();
+					}
+					else if(memory)
+					{
+						data = memory->getNodeData(iter->first, localCloudMaker_->isGridFromDepth(), !localCloudMaker_->isGridFromDepth(), !localCloudMaker_->isGridFromDepth(), false, false);
+					}
+
+					ROS_DEBUG("Adding cloud %d to cache...", iter->first);
+					pcl::PCLPointCloud2Ptr cloud2;
+					pcl::IndicesPtr groundIndices, obstacleIndices, emptyIndices;
+					pcl::PointXYZ viewPoint;
+					if(iter->first > 0)
+					{
+						cv::Mat rgb, depth;
+						LaserScan scan;
+						PointCloud2 pointCloud2;
+						data.uncompressData(
+								localGridMaker_->isGridFromDepth()?&rgb:0,
+								localGridMaker_->isGridFromDepth()?&depth:0,
+								!localGridMaker_->isGridFromDepth()?&scan:0,
+								!localGridMaker_->isGridFromDepth()?&pointCloud2:0,
+								0,
+								0,
+								0,
+								0);
+						Signature tmp(data);
+						tmp.setPose(iter->second);
+						localCloudMaker_->createLocalMap(tmp, cloud2, groundIndices, obstacleIndices, emptyIndices, viewPoint);
+						localClouds_.add(iter->first, *cloud2, *groundIndices, *obstacleIndices, *emptyIndices, localCloudMaker_->getCellSize(), viewPoint);
+					}
+					else
+					{
+						cv::Mat rgb, depth;
+						LaserScan scan;
+						PointCloud2 pointCloud2;						
+						data.uncompressData(
+							localCloudMaker_->isGridFromDepth()?&rgb:0,
+							localCloudMaker_->isGridFromDepth()?&depth:0,
+							!localCloudMaker_->isGridFromDepth()?&scan:0,
+							!localCloudMaker_->isGridFromDepth()?&pointCloud2:0,
+							0,
+							0,
+							0,
+							0);
+
+						Signature tmp(data);
+						tmp.setPose(iter->second);
+						localCloudMaker_->createLocalMap(tmp, cloud2, groundIndices, obstacleIndices, emptyIndices, viewPoint);
+						localClouds_.add(iter->first, *cloud2, *groundIndices, *obstacleIndices, *emptyIndices, localCloudMaker_->getCellSize(), viewPoint);
+					} 
+				} 
 			}
 			else
 			{
@@ -713,7 +788,8 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 		}
 #endif
 
-		localMaps_.clear(true);
+		localGrids_.clear(true);
+		localClouds_.clear(true);
 
 		for(std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr >::iterator iter=groundClouds_.begin();
 			iter!=groundClouds_.end();)
@@ -750,6 +826,33 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 	return filteredPoses;
 }
 
+pcl::IndicesPtr subtractFilteringIndex(
+		const pcl::PointCloud<pcl::PointXYZRGB>::Ptr & cloud,
+		const rtabmap::FlannIndex & substractCloudIndex,
+		float radiusSearch,
+		int minNeighborsInRadius)
+{
+	UASSERT(minNeighborsInRadius > 0);
+	UASSERT(substractCloudIndex.indexedFeatures());
+
+	pcl::IndicesPtr output(new pcl::Indices);
+	output->reserve(cloud->size());
+
+	for(unsigned int i=0; i < (cloud->height * cloud->width); ++i)
+	{
+		std::vector<std::vector<size_t> > kIndices;
+		std::vector<std::vector<float> > kDistances;
+		cv::Mat pt = (cv::Mat_<float>(1, 3) << cloud->at(i).x, cloud->at(i).y, cloud->at(i).z);
+		substractCloudIndex.radiusSearch(pt, kIndices, kDistances, radiusSearch, minNeighborsInRadius, 32, 0, false);
+		if(kIndices.size() == 1 && kIndices[0].size() < minNeighborsInRadius)
+		{
+			output->push_back(i);
+		}
+	}
+
+	return output;
+}
+
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr subtractFiltering(
 		const pcl::PointCloud<pcl::PointXYZRGB>::Ptr & cloud,
 		const rtabmap::FlannIndex & substractCloudIndex,
@@ -760,20 +863,41 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr subtractFiltering(
 	UASSERT(substractCloudIndex.indexedFeatures());
 
 	pcl::PointCloud<pcl::PointXYZRGB>::Ptr output(new pcl::PointCloud<pcl::PointXYZRGB>);
-	output->resize(cloud->size());
-	int oi = 0; // output iterator
-	for(unsigned int i=0; i<cloud->size(); ++i)
-	{
-		std::vector<std::vector<size_t> > kIndices;
-		std::vector<std::vector<float> > kDistances;
-		cv::Mat pt = (cv::Mat_<float>(1, 3) << cloud->at(i).x, cloud->at(i).y, cloud->at(i).z);
-		substractCloudIndex.radiusSearch(pt, kIndices, kDistances, radiusSearch, minNeighborsInRadius, 32, 0, false);
-		if(kIndices.size() == 1 && kIndices[0].size() < minNeighborsInRadius)
-		{
-			output->at(oi++) = cloud->at(i);
-		}
-	}
-	output->resize(oi);
+
+	pcl::IndicesPtr indices = subtractFilteringIndex(cloud, substractCloudIndex, radiusSearch, minNeighborsInRadius);
+
+	// Create the filtering object
+	pcl::ExtractIndices<pcl::PointXYZRGB> extract;
+	// Extract the inliers
+	extract.setInputCloud(cloud);
+	extract.setIndices(indices);
+	extract.setNegative(false);
+	extract.filter(*output);	
+	
+	return output;
+}
+
+pcl::PCLPointCloud2::Ptr subtractFiltering(
+		const pcl::PCLPointCloud2::Ptr & cloud,
+		const rtabmap::FlannIndex & substractCloudIndex,
+		float radiusSearch,
+		int minNeighborsInRadius)
+{
+	pcl::PCLPointCloud2::Ptr output(new pcl::PCLPointCloud2);
+
+	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_xyz, substractCloud_xyz;
+	fromPCLPointCloud2(*cloud, *cloud_xyz);
+	
+	pcl::IndicesPtr indices = subtractFilteringIndex(cloud_xyz, substractCloudIndex, radiusSearch, minNeighborsInRadius);
+
+	// Create the filtering object
+	pcl::ExtractIndices<pcl::PCLPointCloud2> extract;
+	// Extract the inliers
+	extract.setInputCloud(cloud);
+	extract.setIndices(indices);
+	extract.setNegative(false);
+	extract.filter(*output);	
+
 	return output;
 }
 
@@ -819,6 +943,8 @@ void MapsManager::publishMaps(
 		bool updateObstacles = cloudMapPub_.getNumSubscribers() ||
 				   scanMapPub_.getNumSubscribers() ||
 				   cloudObstaclesPub_.getNumSubscribers();
+		
+		// Check if graph changes have exceeded distance threshold
 		bool graphGroundChanged = updateGround;
 		bool graphObstacleChanged = updateObstacles;
 		float updateErrorSqr = occupancyGrid_->getUpdateError()*occupancyGrid_->getUpdateError();
@@ -852,6 +978,8 @@ void MapsManager::publishMaps(
 				}
 			}
 		}
+		
+		// Clear clouds in anticipation of reoptimization
 		int countObstacles = 0;
 		int countGrounds = 0;
 		int previousIndexedGroundSize = assembledGroundIndex_.indexedFeatures();
@@ -873,6 +1001,7 @@ void MapsManager::publishMaps(
 			assembledObstacleIndex_.release();
 		}
 
+		// Generate new clouds
 		if(graphGroundOptimized || graphObstacleOptimized)
 		{
 			ROS_INFO("Graph has changed, updating clouds...");
@@ -958,14 +1087,14 @@ void MapsManager::publishMaps(
 
 		for(std::map<int, Transform>::const_iterator iter = poses.begin(); iter!=poses.end(); ++iter)
 		{
-			std::map<int, LocalGrid>::const_iterator jter = localMaps_.localGrids().find(iter->first);
+			std::map<int, LocalGrid>::const_iterator jter = localGrids_.localGrids().find(iter->first);
 			if(updateGround  && assembledGroundPoses_.find(iter->first) == assembledGroundPoses_.end())
 			{
 				if(iter->first > 0)
 				{
 					assembledGroundPoses_.insert(*iter);
 				}
-				if(jter!=localMaps_.end() && jter->second.groundCells.cols)
+				if(jter!=localGrids_.end() && jter->second.groundCells.cols)
 				{
 					pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed = util3d::laserScanToPointCloudRGB(LaserScan::backwardCompatibility(jter->second.groundCells), iter->second, 0, 255, 0);
 					pcl::PointCloud<pcl::PointXYZRGB>::Ptr subtractedCloud = transformed;
@@ -1012,7 +1141,7 @@ void MapsManager::publishMaps(
 				{
 					assembledObstaclePoses_.insert(*iter);
 				}
-				if(jter!=localMaps_.end() && jter->second.obstacleCells.cols)
+				if(jter!=localGrids_.end() && jter->second.obstacleCells.cols)
 				{
 					pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed = util3d::laserScanToPointCloudRGB(LaserScan::backwardCompatibility(jter->second.obstacleCells), iter->second, 255, 0, 0);
 					pcl::PointCloud<pcl::PointXYZRGB>::Ptr subtractedCloud = transformed;
@@ -1419,7 +1548,7 @@ void MapsManager::publishMaps(
 			}
 			else if(poses.size())
 			{
-				ROS_WARN("Grid map is empty! (local maps=%d)", (int)localMaps_.size());
+				ROS_WARN("Grid map is empty! (local maps=%d)", (int)localGrids_.size());
 			}
 		}
 		if(gridMapPub_.getNumSubscribers() || projMapPub_.getNumSubscribers())
@@ -1465,7 +1594,7 @@ void MapsManager::publishMaps(
 			}
 			else if(poses.size())
 			{
-				ROS_WARN("Grid map is empty! (local maps=%d)", (int)localMaps_.size());
+				ROS_WARN("Grid map is empty! (local maps=%d)", (int)localGrids_.size());
 			}
 		}
 	}
@@ -1509,12 +1638,18 @@ void MapsManager::publishMaps(
 #endif
 	if(!this->hasSubscribers() && mapCacheCleanup_)
 	{
-		if(!localMaps_.empty())
+		if(!localGrids_.empty())
 		{
-			size_t totalBytes = localMaps_.getMemoryUsed();
-			ROS_INFO("MapsManager: cleanup %ld grid maps (~%ld MB)...", localMaps_.size(), totalBytes/1048576);
+			size_t totalBytes = localGrids_.getMemoryUsed();
+			ROS_INFO("MapsManager: cleanup %ld grid maps (~%ld MB)...", localGrids_.size(), totalBytes/1048576);
 		}
-		localMaps_.clear();
+		localGrids_.clear();
+		if(!localClouds_.empty())
+		{
+			size_t totalBytes = localClouds_.getMemoryUsed();
+			ROS_INFO("MapsManager: cleanup %ld cloud maps (~%ld MB)...", localClouds_.size(), totalBytes/1048576);
+		}
+		localClouds_.clear();		
 	}
 }
 

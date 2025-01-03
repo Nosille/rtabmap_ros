@@ -288,6 +288,7 @@ public:
 					0,
 					false,
 					false,
+					false,
 					nodes_);
 		}
 		double updateTime = timer.ticks();
@@ -317,7 +318,7 @@ public:
 		res.map.header.frame_id = mapFrameId_;
 		res.map.header.stamp = ros::Time::now();
 
-		mapsManager_.updateMapCaches(optimizedPoses_, 0, false, true, nodes_);
+		mapsManager_.updateMapCaches(optimizedPoses_, 0, false, false, true, nodes_);
 
 		const rtabmap::OctoMap * octomap = mapsManager_.getOctomap();
 		bool success = octomap->octree()->size() && octomap_msgs::binaryMapToMsg(*octomap->octree(), res.map);
@@ -332,7 +333,7 @@ public:
 		res.map.header.frame_id = mapFrameId_;
 		res.map.header.stamp = ros::Time::now();
 
-		mapsManager_.updateMapCaches(optimizedPoses_, 0, false, true, nodes_);
+		mapsManager_.updateMapCaches(optimizedPoses_, 0, false, false, true, nodes_);
 
 		const rtabmap::OctoMap * octomap = mapsManager_.getOctomap();
 		bool success = octomap->octree()->size() && octomap_msgs::fullMapToMsg(*octomap->octree(), res.map);

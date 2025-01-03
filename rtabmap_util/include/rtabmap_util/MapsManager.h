@@ -32,6 +32,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/core/Parameters.h>
 #include <rtabmap/core/FlannIndex.h>
 #include <rtabmap/core/LocalGrid.h>
+#include <rtabmap/core/LocalCloud.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <ros/time.h>
@@ -42,6 +43,7 @@ class OctoMap;
 class Memory;
 class OccupancyGrid;
 class LocalGridMaker;
+class LocalCloudMaker;
 class GridMap;
 
 }  // namespace rtabmap
@@ -68,6 +70,7 @@ public:
 			const std::map<int, rtabmap::Transform> & poses,
 			const rtabmap::Memory * memory,
 			bool updateGrid,
+			bool updateCloud,
 			bool updateOctomap,
 			const std::map<int, rtabmap::Signature> & signatures = std::map<int, rtabmap::Signature>());
 
@@ -88,7 +91,8 @@ public:
 
 	const rtabmap::OctoMap * getOctomap() const {return octomap_;}
 	const rtabmap::OccupancyGrid * getOccupancyGrid() const {return occupancyGrid_;}
-	const rtabmap::LocalGridMaker * getLocalMapMaker() const {return localMapMaker_;}
+	const rtabmap::LocalGridMaker * getLocalGridMaker() const {return localGridMaker_;}
+	const rtabmap::LocalCloudMaker * getLocalCloudMaker() const {return localCloudMaker_;}
 
 private:
 	// mapping stuff
@@ -127,10 +131,12 @@ private:
 	std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr > groundClouds_;
 	std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr > obstacleClouds_;
 
-	rtabmap::LocalGridCache localMaps_;
+	rtabmap::LocalGridCache localGrids_;
+	rtabmap::LocalCloudCache localClouds_;
 
 	rtabmap::OccupancyGrid * occupancyGrid_;
-	rtabmap::LocalGridMaker * localMapMaker_;
+	rtabmap::LocalGridMaker * localGridMaker_;	
+	rtabmap::LocalCloudMaker * localCloudMaker_;
 	bool gridUpdated_;
 
 	rtabmap::OctoMap * octomap_;

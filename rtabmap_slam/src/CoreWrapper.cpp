@@ -2150,7 +2150,7 @@ void CoreWrapper::process(
 					rtabmap_.getMemory()->getLastSignatureId() != filteredPoses.rbegin()->first ||
 					rtabmap_.getMemory()->getLastWorkingSignature() == 0 ||
 					rtabmap_.getMemory()->getLastWorkingSignature()->sensorData().gridCellSize() == 0 ||
-					(!mapsManager_.getLocalMapMaker()->isGridFromDepth() && data.laserScanRaw().is2d())) // 2d laser scan would fill empty space for latest data
+					(!mapsManager_.getLocalGridMaker()->isGridFromDepth() && data.laserScanRaw().is2d())) // 2d laser scan would fill empty space for latest data
 				{
 					SensorData tmpData = data;
 					tmpData.setId(0);
@@ -2188,6 +2188,7 @@ void CoreWrapper::process(
 				filteredPoses = mapsManager_.updateMapCaches(
 						filteredPoses,
 						rtabmap_.getMemory(),
+						false,
 						false,
 						false,
 						tmpSignature);
@@ -3430,7 +3431,7 @@ bool CoreWrapper::getMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetM
 {
 	// Make sure grid map cache is up to date (in case there is no subscriber on map topics)
 	std::map<int, Transform> poses = rtabmap_.getLocalOptimizedPoses();
-	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), true, false);
+	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), true, true, false);
 
 	// create the grid map
 	float xMin=0.0f, yMin=0.0f, gridCellSize = 0.05f;
@@ -3471,7 +3472,7 @@ bool CoreWrapper::getProbMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::
 {
 	// Make sure grid map cache is up to date (in case there is no subscriber on map topics)
 	std::map<int, Transform> poses = rtabmap_.getLocalOptimizedPoses();
-	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), true, false);
+	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), true, false, false);
 
 	// create the grid map
 	float xMin=0.0f, yMin=0.0f, gridCellSize = 0.05f;
@@ -3624,6 +3625,7 @@ bool CoreWrapper::publishMapCallback(rtabmap_msgs::PublishMap::Request& req, rta
 					filteredPoses = mapsManager_.updateMapCaches(
 							filteredPoses,
 							rtabmap_.getMemory(),
+							false,
 							false,
 							false,
 							signatures);
@@ -4629,7 +4631,7 @@ bool CoreWrapper::octomapBinaryCallback(
 		poses = filterNodesToAssemble(poses, poses.rbegin()->second);
 	}
 
-	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), false, true);
+	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), false, false, true);
 
 	const rtabmap::OctoMap * octomap = mapsManager_.getOctomap();
 	bool success = octomap->octree()->size() && octomap_msgs::binaryMapToMsg(*octomap->octree(), res.map);
@@ -4650,7 +4652,7 @@ bool CoreWrapper::octomapFullCallback(
 		poses = filterNodesToAssemble(poses, poses.rbegin()->second);
 	}
 
-	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), false, true);
+	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), false, false, true);
 
 	const rtabmap::OctoMap * octomap = mapsManager_.getOctomap();
 	bool success = octomap->octree()->size() && octomap_msgs::fullMapToMsg(*octomap->octree(), res.map);
