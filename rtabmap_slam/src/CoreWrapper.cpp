@@ -3472,7 +3472,7 @@ bool CoreWrapper::getProbMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::
 {
 	// Make sure grid map cache is up to date (in case there is no subscriber on map topics)
 	std::map<int, Transform> poses = rtabmap_.getLocalOptimizedPoses();
-	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), true, false, false);
+	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), true, true, false);
 
 	// create the grid map
 	float xMin=0.0f, yMin=0.0f, gridCellSize = 0.05f;

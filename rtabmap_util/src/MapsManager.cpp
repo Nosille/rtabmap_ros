@@ -72,8 +72,8 @@ MapsManager::MapsManager() :
 		mapCacheCleanup_(true),
 		alwaysUpdateMap_(false),
 		scanEmptyRayTracing_(true),
-		assembledObstacles_(new pcl::PointCloud<pcl::PointXYZRGB>),
-		assembledGround_(new pcl::PointCloud<pcl::PointXYZRGB>),
+		assembledObstacles_(new pcl::PCLPointCloud2),
+		assembledGround_(new pcl::PCLPointCloud2),
 		occupancyGrid_(new OccupancyGrid(&localGrids_)),
 		localGridMaker_(new LocalGridMaker),
 		localCloudMaker_(new LocalCloudMaker),		
@@ -397,8 +397,8 @@ void MapsManager::clear()
 {
 	localGrids_.clear();
 	localClouds_.clear();
-	assembledGround_->clear();
-	assembledObstacles_->clear();
+	assembledGround_ = pcl::PCLPointCloud2::Ptr(new pcl::PCLPointCloud2);
+	assembledObstacles_= pcl::PCLPointCloud2::Ptr(new pcl::PCLPointCloud2);
 	assembledGroundPoses_.clear();
 	assembledObstaclePoses_.clear();
 	assembledGroundIndex_.release();
@@ -492,9 +492,6 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 		updateElevation = elevationMapPub_.getNumSubscribers() != 0;
 
 		updateGridCache = updateOctomap || updateGrid || updateElevation ||
-				cloudMapPub_.getNumSubscribers() != 0 ||
-				cloudObstaclesPub_.getNumSubscribers() != 0 ||
-				cloudGroundPub_.getNumSubscribers() != 0 ||
 				scanMapPub_.getNumSubscribers() != 0;
 
 		updateCloudCache = 
@@ -791,7 +788,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 		localGrids_.clear(true);
 		localClouds_.clear(true);
 
-		for(std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr >::iterator iter=groundClouds_.begin();
+		for(std::map<int, pcl::PCLPointCloud2::Ptr >::iterator iter=groundClouds_.begin();
 			iter!=groundClouds_.end();)
 		{
 			if(!uContains(poses, iter->first))
@@ -804,7 +801,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 			}
 		}
 
-		for(std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr >::iterator iter=obstacleClouds_.begin();
+		for(std::map<int, pcl::PCLPointCloud2::Ptr >::iterator iter=obstacleClouds_.begin();
 			iter!=obstacleClouds_.end();)
 		{
 			if(!uContains(poses, iter->first))
@@ -944,7 +941,7 @@ void MapsManager::publishMaps(
 				   scanMapPub_.getNumSubscribers() ||
 				   cloudObstaclesPub_.getNumSubscribers();
 		
-		// Check if graph changes have exceeded threshold (flag for full update)
+		// Check if graph changes have exceeded threshold (flag for optimization)
 		bool graphGroundChanged = updateGround;
 		bool graphObstacleChanged = updateObstacles;
 		float updateErrorSqr = occupancyGrid_->getUpdateError()*occupancyGrid_->getUpdateError();
@@ -986,17 +983,17 @@ void MapsManager::publishMaps(
 		int previousIndexedObstacleSize = assembledObstacleIndex_.indexedFeatures();
 		if(graphGroundOptimized || graphGroundChanged)
 		{
-			int previousSize = assembledGround_->size();
-			assembledGround_->clear();
-			assembledGround_->reserve(previousSize);
+			assembledGround_->height = 0;
+			assembledGround_->width = 0;
+			assembledGround_->data.clear();
 			assembledGroundPoses_.clear();
 			assembledGroundIndex_.release();
 		}
 		if(graphObstacleOptimized || graphObstacleChanged )
 		{
-			int previousSize = assembledObstacles_->size();
-			assembledObstacles_->clear();
-			assembledObstacles_->reserve(previousSize);
+			assembledObstacles_->height = 0;
+			assembledObstacles_->width = 0;
+			assembledObstacles_->data.clear();
 			assembledObstaclePoses_.clear();
 			assembledObstacleIndex_.release();
 		}
@@ -1013,24 +1010,24 @@ void MapsManager::publishMaps(
 				if(updateGround  &&
 				   (graphGroundOptimized || assembledGroundPoses_.find(iter->first) == assembledGroundPoses_.end()))
 				{
-					std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr >::iterator kter=groundClouds_.find(iter->first);
-					if(kter != groundClouds_.end() && kter->second->size())
+					std::map<int, pcl::PCLPointCloud2::Ptr >::iterator kter=groundClouds_.find(iter->first);
+					if(kter != groundClouds_.end() && kter->second->width)
 					{
 						assembledGroundPoses_.insert(*iter);
-						pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed = util3d::transformPointCloud(kter->second, iter->second);
+						pcl::PCLPointCloud2::Ptr transformed = util3d::transformPointCloud(kter->second, iter->second);
 						*assembledGround_+=*transformed;
 						// if(cloudSubtractFiltering_)
 						// {
-						// 	for(unsigned int i=0; i<transformed->size(); ++i)
+						// 	for(unsigned int i=0; i<(transformed->height * transformed->width); ++i)
 						// 	{
 						// 		if(tmpGroundPts.empty())
 						// 		{
-						// 			tmpGroundPts = (cv::Mat_<float>(1, 3) << transformed->at(i).x, transformed->at(i).y, transformed->at(i).z);
+						// 			tmpGroundPts = (cv::Mat_<float>(1, 3) << transformed->at(i,0), transformed->at(i,4), transformed->at(i,8));
 						// 			tmpGroundPts.reserve(previousIndexedGroundSize>0?previousIndexedGroundSize:100);
 						// 		}
 						// 		else
 						// 		{
-						// 			cv::Mat pt = (cv::Mat_<float>(1, 3) << transformed->at(i).x, transformed->at(i).y, transformed->at(i).z);
+						// 			cv::Mat pt = (cv::Mat_<float>(1, 3) << transformed->at(i,0), transformed->at(i,4), transformed->at(i,8));
 						// 			tmpGroundPts.push_back(pt);
 						// 		}
 						// 	}
@@ -1041,15 +1038,15 @@ void MapsManager::publishMaps(
 				if(updateObstacles  &&
 				   (graphObstacleOptimized || assembledObstaclePoses_.find(iter->first) == assembledObstaclePoses_.end()))
 				{
-					std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr >::iterator kter=obstacleClouds_.find(iter->first);
-					if(kter != obstacleClouds_.end() && kter->second->size())
+					std::map<int, pcl::PCLPointCloud2::Ptr >::iterator kter=obstacleClouds_.find(iter->first);
+					if(kter != obstacleClouds_.end() && kter->second->width)
 					{
 						assembledObstaclePoses_.insert(*iter);
-						pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed = util3d::transformPointCloud(kter->second, iter->second);
+						pcl::PCLPointCloud2::Ptr transformed = util3d::transformPointCloud(kter->second, iter->second);
 						*assembledObstacles_+=*transformed;
 						// if(cloudSubtractFiltering_)
 						// {
-						// 	for(unsigned int i=0; i<transformed->size(); ++i)
+						// 	for(unsigned int i=0; i<(transformed->height * transformed->width); ++i)
 						// 	{
 						// 		if(tmpObstaclePts.empty())
 						// 		{
@@ -1087,28 +1084,28 @@ void MapsManager::publishMaps(
 
 		for(std::map<int, Transform>::const_iterator iter = poses.begin(); iter!=poses.end(); ++iter)
 		{
-			std::map<int, LocalGrid>::const_iterator jter = localGrids_.localGrids().find(iter->first);
+			std::map<int, LocalCloud>::const_iterator jter = localClouds_.localClouds().find(iter->first);
 			if(updateGround  && assembledGroundPoses_.find(iter->first) == assembledGroundPoses_.end())
 			{
 				if(iter->first > 0)
 				{
 					assembledGroundPoses_.insert(*iter);
 				}
-				if(jter!=localGrids_.end() && jter->second.groundCells.cols)
+				if(jter!=localClouds_.end() && jter->second.cloud2.width)
 				{
-					pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed = util3d::laserScanToPointCloudRGB(LaserScan::backwardCompatibility(jter->second.groundCells), iter->second, 0, 255, 0);
-					pcl::PointCloud<pcl::PointXYZRGB>::Ptr subtractedCloud = transformed;
+					pcl::PCLPointCloud2::Ptr transformed = util3d::transformPointCloud(pcl::make_shared<pcl::PCLPointCloud2>(jter->second.cloud2), pcl::make_shared<pcl::Indices>(jter->second.groundIndices), iter->second);
+					pcl::PCLPointCloud2::Ptr subtractedCloud = transformed;
 					// if(cloudSubtractFiltering_)
 					// {
 					// 	if(assembledGroundIndex_.indexedFeatures())
 					// 	{
 					// 		subtractedCloud = subtractFiltering(transformed, assembledGroundIndex_, occupancyGrid_->getCellSize(), cloudSubtractFilteringMinNeighbors_);
 					// 	}
-					// 	if(subtractedCloud->size())
+					// 	if(subtractedCloud->height * subtractedCloud->width)
 					// 	{
-					// 		UDEBUG("Adding ground %d pts=%d/%d (index=%d)", iter->first, subtractedCloud->size(), transformed->size(), assembledGroundIndex_.indexedFeatures());
-					// 		cv::Mat pts(subtractedCloud->size(), 3, CV_32FC1);
-					// 		for(unsigned int i=0; i<subtractedCloud->size(); ++i)
+					// 		UDEBUG("Adding ground %d pts=%d/%d (index=%d)", iter->first, subtractedCloud->height * subtractedCloud->width, transformed->height * transformed->width, assembledGroundIndex_.indexedFeatures());
+					// 		cv::Mat pts(subtractedCloud->height * subtractedCloud->width, 3, CV_32FC1);
+					// 		for(unsigned int i=0; i<subtractedCloud->height * subtractedCloud->width; ++i)
 					// 		{
 					// 			pts.at<float>(i, 0) = subtractedCloud->at(i).x;
 					// 			pts.at<float>(i, 1) = subtractedCloud->at(i).y;
@@ -1128,7 +1125,7 @@ void MapsManager::publishMaps(
 					{
 						groundClouds_.insert(std::make_pair(iter->first, util3d::transformPointCloud(subtractedCloud, iter->second.inverse())));
 					}
-					if(subtractedCloud->size())
+					if(subtractedCloud->height * subtractedCloud->width)
 					{
 						*assembledGround_+=*subtractedCloud;
 					}
@@ -1141,21 +1138,21 @@ void MapsManager::publishMaps(
 				{
 					assembledObstaclePoses_.insert(*iter);
 				}
-				if(jter!=localGrids_.end() && jter->second.obstacleCells.cols)
+				if(jter!=localClouds_.end() && jter->second.cloud2.width)
 				{
-					pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed = util3d::laserScanToPointCloudRGB(LaserScan::backwardCompatibility(jter->second.obstacleCells), iter->second, 255, 0, 0);
-					pcl::PointCloud<pcl::PointXYZRGB>::Ptr subtractedCloud = transformed;
+					pcl::PCLPointCloud2::Ptr transformed = util3d::transformPointCloud(pcl::make_shared<pcl::PCLPointCloud2>(jter->second.cloud2), pcl::make_shared<pcl::Indices>(jter->second.obstacleIndices), iter->second);
+					pcl::PCLPointCloud2::Ptr subtractedCloud = transformed;
 					// if(cloudSubtractFiltering_)
 					// {
 					// 	if(assembledObstacleIndex_.indexedFeatures())
 					// 	{
 					// 		subtractedCloud = subtractFiltering(transformed, assembledObstacleIndex_, occupancyGrid_->getCellSize(), cloudSubtractFilteringMinNeighbors_);
 					// 	}
-					// 	if(subtractedCloud->size())
+					// 	if(subtractedCloud->height * subtractedCloud->width)
 					// 	{
-					// 		UDEBUG("Adding obstacle %d pts=%d/%d (index=%d)", iter->first, subtractedCloud->size(), transformed->size(), assembledObstacleIndex_.indexedFeatures());
-					// 		cv::Mat pts(subtractedCloud->size(), 3, CV_32FC1);
-					// 		for(unsigned int i=0; i<subtractedCloud->size(); ++i)
+					// 		UDEBUG("Adding obstacle %d pts=%d/%d (index=%d)", iter->first, subtractedCloud->height * subtractedCloud->width, transformed->height * transformed->width, assembledObstacleIndex_.indexedFeatures());
+					// 		cv::Mat pts(subtractedCloud->height * subtractedCloud->width, 3, CV_32FC1);
+					// 		for(unsigned int i=0; i<subtractedCloud->height * subtractedCloud->width; ++i)
 					// 		{
 					// 			pts.at<float>(i, 0) = subtractedCloud->at(i).x;
 					// 			pts.at<float>(i, 1) = subtractedCloud->at(i).y;
@@ -1175,7 +1172,7 @@ void MapsManager::publishMaps(
 					{
 						obstacleClouds_.insert(std::make_pair(iter->first, util3d::transformPointCloud(subtractedCloud, iter->second.inverse())));
 					}
-					if(subtractedCloud->size())
+					if(subtractedCloud->height * subtractedCloud->width)
 					{
 						*assembledObstacles_+=*subtractedCloud;
 					}
@@ -1187,23 +1184,23 @@ void MapsManager::publishMaps(
 		if(cloudOutputVoxelized_)
 		{
 			UASSERT(occupancyGrid_->getCellSize() > 0.0);
-			if(countGrounds && assembledGround_->size())
+			if(countGrounds && assembledGround_->width)
 			{
 				assembledGround_ = util3d::voxelize(assembledGround_, occupancyGrid_->getCellSize());
 			}
-			if(countObstacles && assembledObstacles_->size())
+			if(countObstacles && assembledObstacles_->width)
 			{
 				assembledObstacles_ = util3d::voxelize(assembledObstacles_, occupancyGrid_->getCellSize());
 			}
 		}
 
 		ROS_INFO("Assembled %d obstacle and %d ground clouds (%d points, %fs)",
-				countObstacles, countGrounds, (int)(assembledGround_->size() + assembledObstacles_->size()), time.ticks());
+				countObstacles, countGrounds, (int)(assembledGround_->height*assembledGround_->width + assembledObstacles_->height*assembledObstacles_->width), time.ticks());
 
 		if( countGrounds > 0 ||
 			countObstacles > 0 ||
 			!latching_ ||
-			(assembledGround_->empty() && assembledObstacles_->empty()) ||
+			(assembledGround_->width && assembledObstacles_->width) ||
 			(cloudGroundPub_.getNumSubscribers() && !latched_.at(&cloudGroundPub_)) ||
 			(cloudObstaclesPub_.getNumSubscribers() && !latched_.at(&cloudObstaclesPub_)) ||
 			(cloudMapPub_.getNumSubscribers() && !latched_.at(&cloudMapPub_)) ||
@@ -1212,7 +1209,7 @@ void MapsManager::publishMaps(
 			if(cloudGroundPub_.getNumSubscribers())
 			{
 				sensor_msgs::PointCloud2::Ptr cloudMsg(new sensor_msgs::PointCloud2);
-				pcl::toROSMsg(*assembledGround_, *cloudMsg);
+				pcl_conversions::fromPCL(*assembledGround_, *cloudMsg);
 				cloudMsg->header.stamp = stamp;
 				cloudMsg->header.frame_id = mapFrameId;
 				cloudGroundPub_.publish(cloudMsg);
@@ -1221,7 +1218,7 @@ void MapsManager::publishMaps(
 			if(cloudObstaclesPub_.getNumSubscribers())
 			{
 				sensor_msgs::PointCloud2::Ptr cloudMsg(new sensor_msgs::PointCloud2);
-				pcl::toROSMsg(*assembledObstacles_, *cloudMsg);
+				pcl_conversions::fromPCL(*assembledObstacles_, *cloudMsg);
 				cloudMsg->header.stamp = stamp;
 				cloudMsg->header.frame_id = mapFrameId;
 				cloudObstaclesPub_.publish(cloudMsg);
@@ -1229,9 +1226,9 @@ void MapsManager::publishMaps(
 			}
 			if(cloudMapPub_.getNumSubscribers() || scanMapPub_.getNumSubscribers())
 			{
-				pcl::PointCloud<pcl::PointXYZRGB> cloud = *assembledObstacles_ + *assembledGround_;
+				pcl::PCLPointCloud2 cloud = *assembledObstacles_ + *assembledGround_;
 				sensor_msgs::PointCloud2::Ptr cloudMsg(new sensor_msgs::PointCloud2);
-				pcl::toROSMsg(cloud, *cloudMsg);
+				pcl_conversions::fromPCL(cloud, *cloudMsg);
 				cloudMsg->header.stamp = stamp;
 				cloudMsg->header.frame_id = mapFrameId;
 
@@ -1253,29 +1250,38 @@ void MapsManager::publishMaps(
 		if(!groundClouds_.empty() || !obstacleClouds_.empty())
 		{
 			size_t totalBytes = 0;
-			for(std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr >::iterator iter=groundClouds_.begin();iter!=groundClouds_.end();++iter)
+			for(std::map<int, pcl::PCLPointCloud2::Ptr >::iterator iter=groundClouds_.begin();iter!=groundClouds_.end();++iter)
 			{
-				totalBytes += sizeof(int) + iter->second->points.size()*sizeof(pcl::PointXYZRGB);
+				totalBytes += sizeof(int) + sizeof(pcl::PCLHeader) + 4*sizeof(pcl::uindex_t) + 2*sizeof(std::uint8_t) + iter->second->fields.size()*sizeof(pcl::PCLPointField) + iter->second->data.size()*sizeof(std::uint8_t);
 			}
-			for(std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr >::iterator iter=obstacleClouds_.begin();iter!=obstacleClouds_.end();++iter)
+			for(std::map<int, pcl::PCLPointCloud2::Ptr >::iterator iter=obstacleClouds_.begin();iter!=obstacleClouds_.end();++iter)
 			{
-				totalBytes += sizeof(int) + iter->second->points.size()*sizeof(pcl::PointXYZRGB);
+				totalBytes += sizeof(int) + sizeof(pcl::PCLHeader) + 4*sizeof(pcl::uindex_t) + 2*sizeof(std::uint8_t) + iter->second->fields.size()*sizeof(pcl::PCLPointField) + iter->second->data.size()*sizeof(std::uint8_t);
 			}
-			totalBytes += (assembledGround_->size() + assembledObstacles_->size()) *sizeof(pcl::PointXYZRGB);
+			totalBytes += sizeof(pcl::PCLHeader) + 4*sizeof(pcl::uindex_t) + 2*sizeof(std::uint8_t) + assembledGround_->fields.size()*sizeof(pcl::PCLPointField) + assembledGround_->data.size()*sizeof(std::uint8_t);
+			totalBytes += sizeof(pcl::PCLHeader) + 4*sizeof(pcl::uindex_t) + 2*sizeof(std::uint8_t) + assembledObstacles_->fields.size()*sizeof(pcl::PCLPointField) + assembledObstacles_->data.size()*sizeof(std::uint8_t);
 			totalBytes += (assembledGroundPoses_.size() + assembledObstaclePoses_.size()) * 13*sizeof(float);
 			totalBytes += assembledGroundIndex_.indexedFeatures()*assembledGroundIndex_.featuresDim() * sizeof(float);
 			totalBytes += assembledObstacleIndex_.indexedFeatures()*assembledObstacleIndex_.featuresDim() * sizeof(float);
 			ROS_INFO("MapsManager: cleanup point clouds (%ld points, %ld cached clouds, ~%ld MB)...",
-					assembledGround_->size()+assembledObstacles_->size(),
+					assembledGround_->height*assembledGround_->height + assembledObstacles_->height*assembledObstacles_->width,
 					groundClouds_.size()+obstacleClouds_.size(),
 					totalBytes/1048576);
 		}
-		assembledGround_->clear();
-		assembledObstacles_->clear();
+		assembledGround_->height = 0;
+		assembledGround_->width = 0;
+		assembledGround_->data.clear();
+		
+		assembledObstacles_->height = 0;
+		assembledObstacles_->width = 0;
+		assembledObstacles_->data.clear();
+
 		assembledGroundPoses_.clear();
 		assembledObstaclePoses_.clear();
+
 		assembledGroundIndex_.release();
 		assembledObstacleIndex_.release();
+
 		groundClouds_.clear();
 		obstacleClouds_.clear();
 	}

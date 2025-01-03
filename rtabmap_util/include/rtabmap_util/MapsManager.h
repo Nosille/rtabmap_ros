@@ -124,12 +124,12 @@ private:
 
 	std::map<int, rtabmap::Transform> assembledGroundPoses_;
 	std::map<int, rtabmap::Transform> assembledObstaclePoses_;
-	pcl::PointCloud<pcl::PointXYZRGB>::Ptr assembledObstacles_;
-	pcl::PointCloud<pcl::PointXYZRGB>::Ptr assembledGround_;
+	pcl::PCLPointCloud2::Ptr assembledObstacles_;
+	pcl::PCLPointCloud2::Ptr assembledGround_;
 	rtabmap::FlannIndex assembledGroundIndex_;
 	rtabmap::FlannIndex assembledObstacleIndex_;
-	std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr > groundClouds_;
-	std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr > obstacleClouds_;
+	std::map<int, pcl::PCLPointCloud2::Ptr > groundClouds_;
+	std::map<int, pcl::PCLPointCloud2::Ptr > obstacleClouds_;
 
 	rtabmap::LocalGridCache localGrids_;
 	rtabmap::LocalCloudCache localClouds_;
